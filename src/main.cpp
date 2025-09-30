@@ -12,6 +12,20 @@ void signal_handler(int signal) {
     running = false;
 }
 
+
+/*
+    Author: Yubraj Rai
+
+    Adjusts the maximum number of file descriptors a process is allowed to use.
+    High-performance servers require a large number of simultaneous connections.
+
+    • Each client connection → 1 socket → 1 file descriptor (FD)
+    • Default Linux FD limits are typically 1024 or 4096, which is too low
+      for servers handling millions of requests.
+    • Raising the limit to millions allows the server to handle a massive
+      number of concurrent connections without hitting OS restrictions.
+*/
+
 void tune_system_limits() {
     struct rlimit limit;
 
@@ -48,22 +62,22 @@ int main() {
                 resp.set_status(200);
                 resp.set_content_type("text/html");
                 resp.set_body(R"(
-<html>
-<head><title>EventCore Server</title></head>
-<body>
-    <h1>Welcome to EventCore</h1>
-    <p>High-performance C++ HTTP Server</p>
-    <ul>
-        <li><a href="/health">Health Check</a></li>
-        <li><a href="/api/hello">Hello API</a></li>
-        <li><a href="/api/time">Current Time</a></li>
-        <li><a href="/api/echo">Echo Test</a></li>
-    </ul>
-</body>
-</html>
-)");
+                <html>
+                <head><title>EventCore Server</title></head>
+                <body>
+                    <h1>Welcome to EventCore</h1>
+                    <p>High-performance C++ HTTP Server</p>
+                    <ul>
+                        <li><a href="/health">Health Check</a></li>
+                        <li><a href="/api/hello">Hello API</a></li>
+                        <li><a href="/api/time">Current Time</a></li>
+                        <li><a href="/api/echo">Echo Test</a></li>
+                    </ul>
+                </body>
+                </html>
+                )");
                 return resp;
-                });
+        });
 
         server.router().get("/health", [](const eventcore::http::Request& req) {
                 eventcore::http::Response resp = eventcore::http::Response::make_json(200, 
