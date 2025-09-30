@@ -7,7 +7,7 @@ EventCore is free and open source software, distributed under the terms of the [
 > [!IMPORTANT]
 > The goal of this README is to provide a basic, structured introduction to EventCore for developers. Please refer to the [full documentation](docs/) for detailed information on building, configuring, API reference, and more. These documentation pages also contain examples, performance guides, and complete class references.
 
-## Table of contents
+## Table of contents [content pending]
 - [How it works](#how-it-works)
   - [Architecture](#architecture)
   - [Components](#components)
