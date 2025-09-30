@@ -1,47 +1,9 @@
 # EventCore - High-Performance C++ HTTP Server Framework
 
-EventCore (pronounced "event core") is a high-performance C++ HTTP Server Framework designed to handle millions of concurrent connections with minimal latency. Built with architecture inspired by nginx, it provides both a standalone HTTP server and a reusable library for building custom network applications.
-
-EventCore is free and open source software, distributed under the terms of the [MIT License](LICENSE).
-
-> [!IMPORTANT]
-> The goal of this README is to provide a basic, structured introduction to EventCore for developers. Please refer to the [full documentation](docs/) for detailed information on building, configuring, API reference, and more. These documentation pages also contain examples, performance guides, and complete class references.
-
-## Table of contents [content pending]
-- [How it works](#how-it-works)
-  - [Architecture](#architecture)
-  - [Components](#components)
-  - [Configuration](#configuration)
-- [Downloading and installing](#downloading-and-installing)
-  - [Binary installation](#binary-installation)
-  - [Building from source](#building-from-source)
-  - [Package managers](#package-managers)
-- [Getting started with EventCore](#getting-started-with-eventcore)
-  - [Quick start example](#quick-start-example)
-  - [Basic configuration](#basic-configuration)
-  - [Running the server](#running-the-server)
-- [Core features](#core-features)
-  - [HTTP server](#http-server)
-  - [Routing](#routing)
-  - [Middleware](#middleware)
-  - [Performance tuning](#performance-tuning)
-- [Building from source](#building-from-source-1)
-  - [Prerequisites](#prerequisites)
-  - [Cloning the repository](#cloning-the-repository)
-  - [Configuring the build](#configuring-the-build)
-  - [Compiling](#compiling)
-  - [Installation](#installation)
-- [Asking questions and reporting issues](#asking-questions-and-reporting-issues)
-- [Contributing code](#contributing-code)
-- [Additional help and resources](#additional-help-and-resources)
-- [Changelog](#changelog)
-- [License](#license)
+EventCore is a high-performance C++ HTTP Server Framework designed to handle millions of concurrent connections with minimal latency. Built with architecture inspired by nginx, it provides both a standalone HTTP server and a reusable library for building custom network applications.
 
 ## How it works
 EventCore is a C++ framework with source code available for all major POSIX-compliant operating systems. See Platform Support for a full list of compatible systems.
-
-> [!IMPORTANT]
-> While you can build EventCore from source on many systems, we recommend using the official build scripts for optimal performance and feature compatibility.
 
 ### Architecture
 EventCore follows a multi-process, event-driven architecture:
