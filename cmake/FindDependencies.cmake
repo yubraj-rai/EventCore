@@ -1,0 +1,60 @@
+# Find required dependencies
+find_package(Threads REQUIRED)
+
+# Optional dependencies with configuration options
+option(ENABLE_SSL "Enable SSL support" OFF)
+option(ENABLE_ZLIB "Enable compression support" OFF)
+
+if(ENABLE_SSL)
+    find_package(OpenSSL REQUIRED)
+    if(OpenSSL_FOUND)
+        message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+        add_definitions(-DEVENTCORE_SSL_ENABLED)
+    else()
+        message(WARNING "OpenSSL not found - disabling SSL support")
+        set(ENABLE_SSL OFF)
+    endif()
+endif()
+
+if(ENABLE_ZLIB)
+    find_package(ZLIB REQUIRED)
+    if(ZLIB_FOUND)
+        message(STATUS "Zlib found: ${ZLIB_VERSION_STRING}")
+        add_definitions(-DEVENTCORE_ZLIB_ENABLED)
+    else()
+        message(WARNING "Zlib not found - disabling compression support")
+        set(ENABLE_ZLIB OFF)
+    endif()
+endif()
+
+# Test dependencies
+if(BUILD_TESTS)
+    find_package(GTest QUIET)
+    if(GTest_FOUND)
+        message(STATUS "Google Test found: ${GTEST_VERSION}")
+    else()
+        message(WARNING "Google Test not found - disabling tests")
+        set(BUILD_TESTS OFF)
+    endif()
+endif()
+
+# Benchmark dependencies
+if(BUILD_BENCHMARKS)
+    find_package(benchmark QUIET)
+    if(benchmark_FOUND)
+        message(STATUS "Google Benchmark found")
+    else()
+        message(WARNING "Google Benchmark not found - disabling benchmarks")
+        set(BUILD_BENCHMARKS OFF)
+    endif()
+endif()
+
+# Print dependency summary
+message(STATUS "")
+message(STATUS "Dependency Summary:")
+message(STATUS "  Threads: YES")
+message(STATUS "  SSL Support: ${ENABLE_SSL}")
+message(STATUS "  Zlib Support: ${ENABLE_ZLIB}")
+message(STATUS "  Tests: ${BUILD_TESTS}")
+message(STATUS "  Benchmarks: ${BUILD_BENCHMARKS}")
+message(STATUS "")
