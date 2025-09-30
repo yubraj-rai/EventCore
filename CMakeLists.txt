@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.12)
 project(EventCore VERSION 1.0.0 LANGUAGES CXX)
 
 set(PROJECT_DESCRIPTION "High-performance C++14 HTTP Server Framework")
-set(PROJECT_URL "https://github.com/yourusername/eventcore")
+set(PROJECT_URL "https://github.com/yubraj-rai/EventCore")
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
