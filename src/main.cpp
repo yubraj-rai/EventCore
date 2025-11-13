@@ -41,8 +41,7 @@ void tune_system_limits() {
 
     // Log current limits
     getrlimit(RLIMIT_NOFILE, &limit);
-    LOG_INFO("Current FD limit: ", limit.rlim_cur, 
-            " (soft) / ", limit.rlim_max, " (hard)");
+    LOG_INFO("Current FD limit: ", limit.rlim_cur, " (soft) / ", limit.rlim_max, " (hard)");
 }
 
 int main() {
@@ -56,7 +55,6 @@ int main() {
         config.num_workers = 2;
 
         eventcore::server::Server server(config);
-
         server.router().get("/", [](const eventcore::http::Request& req) {
                 eventcore::http::Response resp;
                 resp.set_status(200);

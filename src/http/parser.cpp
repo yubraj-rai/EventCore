@@ -8,28 +8,82 @@ namespace eventcore {
         Parser::Parser() : state_(kExpectRequestLine), request_(nullptr), content_length_(0) {}
 
         bool Parser::parse_request(net::Buffer* buffer, Request* request) {
-            request_ = request; bool ok = true; bool has_more = true;
-            while (has_more) {
+            request_ = request;
+            bool ok = true;
+            bool has_more = true;
+
+            while (has_more && state_ != kComplete) {
                 switch (state_) {
                     case kExpectRequestLine:
                         if (const char* crlf = buffer->find_crlf()) {
                             ok = parse_request_line(buffer->peek(), crlf);
-                            if (ok) { buffer->retrieve(crlf - buffer->peek() + 2); state_ = kExpectHeaders; }
-                        } else has_more = false; break;
+                            if (ok) {
+                                buffer->retrieve(crlf - buffer->peek() + 2);
+                                state_ = kExpectHeaders;
+                            } else {
+                                has_more = false;
+                            }
+                        } else {
+                            has_more = false;
+                        }
+                        break;
+
                     case kExpectHeaders:
                         if (parse_headers(buffer)) {
-                            if (content_length_ > 0) state_ = kExpectBody;
-                            else { state_ = kComplete; has_more = false; }
-                        } else has_more = false; break;
+                            if (content_length_ > 0) {
+                                state_ = kExpectBody;
+                            } else {
+                                state_ = kComplete;
+                                has_more = false;
+                            }
+                        } else {
+                            has_more = false;
+                        }
+                        break;
+
                     case kExpectBody:
-                        if (parse_body(buffer)) { state_ = kComplete; has_more = false; }
-                        else has_more = false; break;
-                    case kComplete: has_more = false; break;
+                        if (parse_body(buffer)) {
+                            state_ = kComplete;
+                            has_more = false;
+                        } else {
+                            has_more = false;
+                        }
+                        break;
+
+                    case kComplete:
+                        has_more = false;
+                        break;
                 }
+
                 if (!ok) break;
             }
-            return ok;
+
+            return ok && state_ == kComplete;
         }
+
+        //bool Parser::parse_request(net::Buffer* buffer, Request* request) {
+        //    request_ = request; bool ok = true; bool has_more = true;
+        //    while (has_more) {
+        //        switch (state_) {
+        //            case kExpectRequestLine:
+        //                if (const char* crlf = buffer->find_crlf()) {
+        //                    ok = parse_request_line(buffer->peek(), crlf);
+        //                    if (ok) { buffer->retrieve(crlf - buffer->peek() + 2); state_ = kExpectHeaders; }
+        //                } else has_more = false; break;
+        //            case kExpectHeaders:
+        //                if (parse_headers(buffer)) {
+        //                    if (content_length_ > 0) state_ = kExpectBody;
+        //                    else { state_ = kComplete; has_more = false; }
+        //                } else has_more = false; break;
+        //            case kExpectBody:
+        //                if (parse_body(buffer)) { state_ = kComplete; has_more = false; }
+        //                else has_more = false; break;
+        //            case kComplete: has_more = false; break;
+        //        }
+        //        if (!ok) break;
+        //    }
+        //    return ok;
+        //}
 
         void Parser::reset() { state_ = kExpectRequestLine; request_ = nullptr; content_length_ = 0; }
 

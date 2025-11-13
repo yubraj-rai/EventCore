@@ -6,22 +6,7 @@
 namespace eventcore {
     namespace server {
 
-        //Server::Server(const Config& config) : config_(config) {
-        //    if (config_.num_workers == 0) {
-        //        config_.num_workers = std::thread::hardware_concurrency();
-        //        if (config_.num_workers == 0) config_.num_workers = 1;
-        //    }
-        //    for (size_t i = 0; i < config_.num_workers; ++i) {
-        //        workers_.push_back(std::make_unique<Worker>(&router_, config_.num_threads_per_worker));
-        //    }
-
-        //    std::stringstream ss;
-        //    ss << "Server configured with " << config_.num_workers << " workers, " 
-        //        << config_.num_threads_per_worker << " threads each";
-        //    LOG_INFO(ss.str());
-        //}
-
-        Server::Server(const Config& config) 
+        Server::Server(const Config& config)
             : config_(config),
             pool_(config_.connection_pool_size) {  // Initialize pool
 
@@ -32,7 +17,7 @@ namespace eventcore {
 
                 for (size_t i = 0; i < config_.num_workers; ++i) {
                     workers_.push_back(std::make_unique<Worker>(
-                                &router_, 
+                                &router_,
                                 config_.num_threads_per_worker,
                                 &pool_));  // Pass pool pointer
                 }
@@ -42,42 +27,55 @@ namespace eventcore {
                         config_.connection_pool_size, " connection pool");
             }
 
-        Server::~Server() { stop(); }
+        Server::~Server() {
+            stop();
+        }
 
         void Server::start() {
             if (running_) return;
+
             auto result = net::Socket::create_tcp();
-            if (result.is_err()) throw std::runtime_error("Failed to create socket: " + result.error());
+            if (result.is_err())
+                throw std::runtime_error("Failed to create socket: " + result.error());
             listen_socket_ = std::move(result.value());
 
             // Set socket options
             auto reuseaddr_result = listen_socket_.set_reuseaddr(true);
-            if (reuseaddr_result.is_err()) throw std::runtime_error("Set reuseaddr failed: " + reuseaddr_result.error());
+            if (reuseaddr_result.is_err())
+                throw std::runtime_error("Set reuseaddr failed: " + reuseaddr_result.error());
 
             auto reuseport_result = listen_socket_.set_reuseport(config_.tcp_reuseport);
-            if (reuseport_result.is_err()) throw std::runtime_error("Set reuseport failed: " + reuseport_result.error());
+            if (reuseport_result.is_err())
+                throw std::runtime_error("Set reuseport failed: " + reuseport_result.error());
 
             auto nodelay_result = listen_socket_.set_nodelay(config_.tcp_nodelay);
-            if (nodelay_result.is_err()) throw std::runtime_error("Set nodelay failed: " + nodelay_result.error());
+            if (nodelay_result.is_err())
+                throw std::runtime_error("Set nodelay failed: " + nodelay_result.error());
 
             auto keepalive_result = listen_socket_.set_keepalive(true);
-            if (keepalive_result.is_err()) throw std::runtime_error("Set keepalive failed: " + keepalive_result.error());
+            if (keepalive_result.is_err())
+                throw std::runtime_error("Set keepalive failed: " + keepalive_result.error());
 
             // Bind and listen
             net::Address addr(config_.host, config_.port);
             auto bind_result = listen_socket_.bind(addr);
-            if (bind_result.is_err()) throw std::runtime_error("Bind failed: " + bind_result.error());
+            if (bind_result.is_err())
+                throw std::runtime_error("Bind failed: " + bind_result.error());
 
             auto listen_result = listen_socket_.listen(config_.backlog);
-            if (listen_result.is_err()) throw std::runtime_error("Listen failed: " + listen_result.error());
+            if (listen_result.is_err())
+                throw std::runtime_error("Listen failed: " + listen_result.error());
 
             auto nonblock_result = listen_socket_.set_nonblocking(true);
-            if (nonblock_result.is_err()) throw std::runtime_error("Set non-blocking failed: " + nonblock_result.error());
+            if (nonblock_result.is_err())
+                throw std::runtime_error("Set non-blocking failed: " + nonblock_result.error());
 
             // Start workers
-            for (auto& worker : workers_) worker->start();
+            for (auto& worker : workers_) {
+                worker->start();
+            }
 
-            running_ = true; 
+            running_ = true;
             accept_thread_ = std::thread(&Server::accept_loop, this);
 
             std::stringstream ss;
@@ -88,20 +86,26 @@ namespace eventcore {
         void Server::stop() {
             if (!running_) return;
             running_ = false;
+
             if (accept_thread_.joinable()) accept_thread_.join();
-            for (auto& worker : workers_) worker->stop();
-            listen_socket_.close(); 
+            for (auto& worker : workers_) {
+                worker->stop();
+            }
+
+            listen_socket_.close();
             LOG_INFO("Server stopped");
         }
 
-        void Server::wait() { 
-            if (accept_thread_.joinable()) accept_thread_.join(); 
+        void Server::wait() {
+            if (accept_thread_.joinable()) {
+                accept_thread_.join();
+            }
         }
 
         void Server::accept_loop() {
             while (running_) {
-                // Batch accept
                 int accepted = 0;
+
                 for (int i = 0; i < config_.accept_batch_size && running_; ++i) {
                     auto result = listen_socket_.accept();
 
@@ -117,12 +121,12 @@ namespace eventcore {
                     }
                 }
 
-                // Brief sleep if no connections accepted
                 if (accepted == 0) {
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
                 }
             }
         }
+
         void Server::handle_new_connection(net::Socket client_socket) {
             int fd = client_socket.fd();
 
@@ -130,7 +134,6 @@ namespace eventcore {
                 return router_.route(req);
             };
 
-            // Get connection from pool
             auto conn = pool_.acquire(fd, request_handler);
 
             if (!conn) {
@@ -139,7 +142,6 @@ namespace eventcore {
                 return;
             }
 
-            // Transfer socket ownership to connection
             client_socket.release();
 
             Worker* worker = next_worker();
@@ -150,6 +152,7 @@ namespace eventcore {
                 pool_.release(fd);
             }
         }
+
         Worker* Server::next_worker() {
             size_t idx = next_worker_idx_++ % workers_.size();
             return workers_[idx].get();
@@ -157,3 +160,4 @@ namespace eventcore {
 
     } // namespace server
 } // namespace eventcore
+

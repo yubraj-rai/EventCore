@@ -6,33 +6,26 @@
 
 namespace eventcore {
     namespace server {
-        // Worker::Worker(const http::Router* router, 
-        //         size_t thread_pool_size,
-        //         ConnectionPool* pool)
-        //     : router_(router), 
-        //     pool_(pool),
-        //     thread_pool_(std::make_unique<thread::ThreadPool>(thread_pool_size)),
-        //     last_timeout_check_(std::chrono::steady_clock::now()) {
 
-        //         poller_ = net::Poller::create();
-        //         if (!poller_) throw std::runtime_error("Failed to create poller");
-        //     }
-
-        Worker::Worker(const http::Router* router, size_t thread_pool_size, ConnectionPool* pool)
+        Worker::Worker(const http::Router* router,
+                size_t thread_pool_size,
+                ConnectionPool* pool)
             : router_(router),
             pool_(pool),
             thread_pool_(std::make_unique<thread::ThreadPool>(thread_pool_size)),
-            last_timeout_check_(std::chrono::steady_clock::now()) {
-
-                poller_ = net::Poller::create();
-                if (!poller_) throw std::runtime_error("Failed to create poller");
+            last_timeout_check_(std::chrono::steady_clock::now()) 
+        {
+            poller_ = net::Poller::create();
+            if (!poller_) {
+                throw std::runtime_error("Failed to create poller");
             }
+        }
 
         Worker::~Worker() { stop(); }
 
         void Worker::start() {
             if (running_) return;
-            running_ = true; 
+            running_ = true;
             thread_pool_->start();
             event_thread_ = std::thread(&Worker::event_loop, this);
             LOG_INFO("Worker started");
@@ -41,14 +34,21 @@ namespace eventcore {
         void Worker::stop() {
             if (!running_) return;
             running_ = false;
-            if (event_thread_.joinable()) event_thread_.join();
-            thread_pool_->stop();
-            { 
-                std::lock_guard<std::mutex> lock(mutex_); 
-                connections_.clear(); 
+
+            if (event_thread_.joinable()) {
+                event_thread_.join();
             }
+
+            thread_pool_->stop();
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                connections_.clear();
+            }
+
             LOG_INFO("Worker stopped");
         }
+
         void Worker::add_connection(http::ConnectionPtr conn) {
             std::lock_guard<std::mutex> lock(mutex_);
             int fd = conn->fd();
@@ -59,10 +59,13 @@ namespace eventcore {
                     pool_->release(conn->fd());
                     });
 
-            if (!poller_->add(fd, net::Poller::kReadable, 
+            if (!poller_->add(
+                        fd,
+                        net::Poller::kReadable,
                         [this](int fd, int events) {
                         handle_connection_event(fd, events);
-                        })) {
+                        })) 
+            {
                 LOG_ERROR("Failed to add connection to poller");
                 connections_.erase(fd);
                 pool_->release(fd);
@@ -115,6 +118,7 @@ namespace eventcore {
                 }
             }
         }
+
         void Worker::handle_connection_event(int fd, int events) {
             std::lock_guard<std::mutex> lock(mutex_);
 
@@ -150,10 +154,12 @@ namespace eventcore {
                 pool_->release(fd);
             }
         }
+
         void Worker::remove_connection(int fd) {
-            poller_->remove(fd); 
+            poller_->remove(fd);
             connections_.erase(fd);
         }
 
     } // namespace server
 } // namespace eventcore
+
