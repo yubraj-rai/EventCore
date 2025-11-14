@@ -26,17 +26,29 @@ if(BUILD_TESTS)
     set_target_properties(test_server PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
     )
-    
+ 
+    add_executable(test_socket_options test_socket_options.cpp)
+    target_link_libraries(test_socket_options PRIVATE eventcore_static GTest::gtest GTest::gtest_main)
+    set_target_properties(test_socket_options PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
+    )
+            
     # Add tests
     add_test(NAME test_http COMMAND test_http)
     add_test(NAME test_net COMMAND test_net)
     add_test(NAME test_thread COMMAND test_thread)
     add_test(NAME test_server COMMAND test_server)
+    add_test(NAME test_socket_options COMMAND test_socket_options)
     
     # Install tests (optional)
     if(INSTALL_TESTS)
-        install(TARGETS test_http test_net test_thread test_server
-            RUNTIME DESTINATION bin/tests
+        install(TARGETS 
+                test_http 
+                test_net 
+                test_thread 
+                test_server
+                test_socket_options
+                RUNTIME DESTINATION bin/tests
         )
     endif()
 endif()
