@@ -6,8 +6,8 @@
 namespace eventcore {
     namespace thread {
 
-        ThreadPool::ThreadPool(size_t num_threads) { 
-            threads_.reserve(num_threads); 
+        ThreadPool::ThreadPool(size_t num_threads) : num_threads_(num_threads) {
+            threads_.reserve(num_threads_);
         }
 
         ThreadPool::~ThreadPool() { 
@@ -17,7 +17,7 @@ namespace eventcore {
         void ThreadPool::start() {
             if (running_) return;
             running_ = true;
-            for (size_t i = 0; i < threads_.capacity(); ++i) {
+            for (size_t i = 0; i < num_threads_; ++i) {
                 threads_.emplace_back(&ThreadPool::worker_thread, this);
             }
 
@@ -30,16 +30,14 @@ namespace eventcore {
             if (!running_) return;
             running_ = false;
 
-            // Wake up all threads
-            for (size_t i = 0; i < threads_.size(); ++i) {
-                submit([]{}); 
-            }
+            // Stop the underlying queue to wake up all waiting threads.
+            tasks_.stop();
 
             // Join all threads
             for (auto& thread : threads_) {
                 if (thread.joinable()) thread.join();
             }
-            threads_.clear(); 
+            threads_.clear();
 
             LOG_INFO("ThreadPool stopped");
         }
@@ -49,14 +47,16 @@ namespace eventcore {
         }
 
         void ThreadPool::worker_thread() {
-            while (running_) {
+            while (true) {
                 try {
                     Task task = tasks_.pop();
                     if (task) task();
                 } catch (const std::exception& e) {
+                    // Queue stopped or fatal error - exit thread
                     std::stringstream ss;
-                    ss << "Exception in worker thread: " << e.what();
-                    LOG_ERROR(ss.str());
+                    ss << "Worker exiting: " << e.what();
+                    LOG_INFO(ss.str());
+                    break;
                 }
             }
         }
