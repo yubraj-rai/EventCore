@@ -459,7 +459,7 @@ TEST_F(SocketOptionsTest, E2E_ClientServerConnection) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto client_result = Socket::create_tcp();
-            ASSERT_TRUE(client_result.is_ok());
+            EXPECT_TRUE(client_result.is_ok());
             Socket client_socket = std::move(client_result.value());
 
             client_socket.set_nodelay(true);
@@ -658,7 +658,7 @@ TEST_F(SocketOptionsTest, KeepaliveDetectDeadPeer_SimulatedDrop) {
     std::thread server_thread([&]() {
             // Accept incoming connection
             auto accept_result = server_socket.accept();
-            ASSERT_TRUE(accept_result.is_ok());
+            EXPECT_TRUE(accept_result.is_ok());
             Socket client_conn = std::move(accept_result.value());
 
             //server is ready, client can connect now
@@ -683,7 +683,7 @@ TEST_F(SocketOptionsTest, KeepaliveDetectDeadPeer_SimulatedDrop) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto client_result = Socket::create_tcp();
-            ASSERT_TRUE(client_result.is_ok());
+            EXPECT_TRUE(client_result.is_ok());
             Socket client_socket = std::move(client_result.value());
 
             auto connect_result = client_socket.connect(server_addr);
@@ -777,7 +777,7 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
 
     std::thread server_thread([&]() {
             auto accept_result = server_socket.accept();
-            ASSERT_TRUE(accept_result.is_ok());
+            EXPECT_TRUE(accept_result.is_ok());
             Socket client_conn = std::move(accept_result.value());
 
             // Monitor connection for 10 seconds
@@ -806,7 +806,7 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto client_result = Socket::create_tcp();
-            ASSERT_TRUE(client_result.is_ok());
+            EXPECT_TRUE(client_result.is_ok());
             Socket client_socket = std::move(client_result.value());
 
             client_socket.set_keepalive(true);
@@ -864,7 +864,7 @@ TEST_F(SocketOptionsTest, KeepaliveMultipleProbeAttempts) {
 
     std::thread server_thread([&]() {
             auto accept_result = server_socket.accept();
-            ASSERT_TRUE(accept_result.is_ok());
+            EXPECT_TRUE(accept_result.is_ok());
             Socket client_conn = std::move(accept_result.value());
 
             auto start = std::chrono::steady_clock::now();
@@ -885,7 +885,7 @@ TEST_F(SocketOptionsTest, KeepaliveMultipleProbeAttempts) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto client_result = Socket::create_tcp();
-            ASSERT_TRUE(client_result.is_ok());
+            EXPECT_TRUE(client_result.is_ok());
             Socket client_socket = std::move(client_result.value());
 
             client_socket.connect(server_addr);
@@ -933,7 +933,7 @@ TEST_F(SocketOptionsTest, KeepaliveIdleConnection_NoDataTransfer) {
 
     std::thread server_thread([&]() {
             auto accept_result = server_socket.accept();
-            ASSERT_TRUE(accept_result.is_ok());
+            EXPECT_TRUE(accept_result.is_ok());
             Socket client_conn = std::move(accept_result.value());
 
             // Just monitor connection without any I/O
@@ -957,7 +957,7 @@ TEST_F(SocketOptionsTest, KeepaliveIdleConnection_NoDataTransfer) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto client_result = Socket::create_tcp();
-            ASSERT_TRUE(client_result.is_ok());
+            EXPECT_TRUE(client_result.is_ok());
             Socket client_socket = std::move(client_result.value());
 
             client_socket.set_keepalive(true);
@@ -999,7 +999,7 @@ TEST_F(SocketOptionsTest, KeepaliveResetOnDataTransfer) {
 
     std::thread server_thread([&]() {
             auto accept_result = server_socket.accept();
-            ASSERT_TRUE(accept_result.is_ok());
+            EXPECT_TRUE(accept_result.is_ok());
             Socket client_conn = std::move(accept_result.value());
 
             char buffer[128];
@@ -1016,7 +1016,7 @@ TEST_F(SocketOptionsTest, KeepaliveResetOnDataTransfer) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
             auto client_result = Socket::create_tcp();
-            ASSERT_TRUE(client_result.is_ok());
+            EXPECT_TRUE(client_result.is_ok());
             Socket client_socket = std::move(client_result.value());
 
             client_socket.connect(server_addr);

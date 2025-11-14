@@ -23,6 +23,7 @@ namespace eventcore {
             private:
                 void worker_thread();
                 std::vector<std::thread> threads_;
+                size_t num_threads_ = 0;
                 BlockingQueue<Task> tasks_;
                 std::atomic<bool> running_{false};
         };
