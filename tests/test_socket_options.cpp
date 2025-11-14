@@ -667,16 +667,16 @@ TEST_F(SocketOptionsTest, KeepaliveDetectDeadPeer_SimulatedDrop) {
             // Keep connection alive and try to detect failure
             char buffer[128];
             while (!connection_failed) {
-                auto recv_result = client_conn.recv(buffer, sizeof(buffer));
-                // Check if connection is broken, When keepalive detects dead peer, recv() returns error or 0
-                if (recv_result.is_err() || recv_result.value() == 0) {
-                    // Keepalive detected the dead connection! 
-                    connection_failed = true;
-                    break;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            auto recv_result = client_conn.recv(buffer, sizeof(buffer));
+            // Check if connection is broken, When keepalive detects dead peer, recv() returns error or 0
+            if (recv_result.is_err() || recv_result.value() == 0) {
+            // Keepalive detected the dead connection! 
+            connection_failed = true;
+            break;
             }
-            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+    });
 
     // Client connects then abruptly disappears (simulated by closing)
     std::thread client_thread([&]() {
@@ -709,6 +709,49 @@ TEST_F(SocketOptionsTest, KeepaliveDetectDeadPeer_SimulatedDrop) {
     server_socket.close();
 }
 
+/*
+   TEST PURPOSE: Verify that a TCP connection remains alive and functional
+   when TCP Keep-Alive probes are successfully acknowledged by the peer.
+
+CONFIGURATION:
+- TCP Keep-Alive is enabled on both server and client sockets.
+- Server Keep-Alive parameters (Linux-specific):
+- TCP_KEEPIDLE (Idle Time): 5 seconds (fast probing)
+- TCP_KEEPINTVL (Probe Interval): 1 second
+- TCP_KEEPCNT (Probe Count): 3
+- Client sends an application-level "heartbeat" message every 25 seconds.
+
+OBSERVED BEHAVIOR (Wireshark/tshark):
+1. After the initial handshake, the server's fast-probing Keep-Alive timer (5s) expires.
+2. The server sends Keep-Alive probes (e.g., at 4.6s, 5.1s, 5.7s, 9.1s, 9.9s).
+3. The client's kernel immediately responds with an ACK for each probe, confirming the
+connection is alive and the probes are working correctly (e.g., Frame 9, 11, 13, etc., in the tshark output).
+4. The first client message is successfully received (successful_sends > 0).
+
+CRITICAL TEST FLAW:
+The 'server_thread' explicitly monitors the connection for only 10 seconds.
+After this 10-second timer expires, the thread function returns. The accepted
+socket 'client_conn' goes out of scope, and its destructor, leveraging RAII,
+calls the underlying 'close()'. This action forcibly closes the connection from
+the server side, preventing the test from observing subsequent client heartbeats
+(due at ~25s, ~50s, etc.).
+
+The assertion EXPECT_FALSE(connection_alive) passes because the server thread
+executes 'connection_alive = false' upon its 10-second timeout, not because
+the connection was killed by a failed Keep-Alive mechanism.
+
+No.,Time,Source,Destination,Protocol,Length,Info
+8,4.608015481,127.0.0.1,127.0.0.1,TCP,66,60310 → 20011 [TCP Keep-Alive] Seq=1 Ack=1 Win=65536 Len=0 TSval=164746434 TSecr=164746434
+9,4.608027097,127.0.0.1,127.0.0.1,TCP,66,20011 → 60310 [ACK] Seq=1 Ack=1 Win=65536 Len=0 TSval=164746434 TSecr=164746434
+10,5.102491494,127.0.0.1,127.0.0.1,TCP,66,60310 → 20011 [TCP Keep-Alive] Seq=10 Ack=1 Win=65536 Len=0 TSval=164761957 TSecr=164756901
+11,5.152253308,127.0.0.1,127.0.0.1,TCP,66,20011 → 60310 [ACK] Seq=1 Ack=11 Win=65536 Len=0 TSval=164761957 TSecr=164746434
+12,5.787408541,127.0.0.1,127.0.0.1,TCP,66,60310 → 20011 [TCP Keep-Alive] Seq=10 Ack=1 Win=65536 Len=0 TSval=164761957 TSecr=164756901
+13,5.7880956,127.0.0.1,127.0.0.1,TCP,66,20011 → 60310 [ACK] Seq=1 Ack=11 Win=65536 Len=0 TSval=164761957 TSecr=164756901
+14,9.183416801,127.0.0.1,127.0.0.1,TCP,66,60310 → 20011 [TCP Keep-Alive] Seq=10 Ack=1 Win=65536 Len=0 TSval=164787013 TSecr=164746434
+15,9.183427953,127.0.0.1,127.0.0.1,TCP,66,20011 → 60310 [ACK] Seq=1 Ack=11 Win=65536 Len=0 TSval=164787013 TSecr=164746434
+16,9.99849562,127.0.0.1,127.0.0.1,TCP,66,60310 → 20011 [TCP Keep-Alive] Seq=10 Ack=1 Win=65536 Len=0 TSval=164771435 TSecr=164756901
+17,9.99850604,127.0.0.1,127.0.0.1,TCP,66,20011 → 60310 [ACK] Seq=1 Ack=11 Win=65536 Len=0 TSval=164771435 TSecr=164756901
+ */
 TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
     uint16_t test_port = 20011;
     Address server_addr("127.0.0.1", test_port);
@@ -721,7 +764,7 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
     server_socket.set_keepalive(true);
 
     // Fast keepalive to test quickly
-    int idle = 2, interval = 1, count = 3;
+    int idle = 5, interval = 1, count = 3;
     setsockopt(server_socket.fd(), IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
     setsockopt(server_socket.fd(), IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
     setsockopt(server_socket.fd(), IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
@@ -743,7 +786,9 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
             char buffer[128];
             auto recv_result = client_conn.recv(buffer, sizeof(buffer));
 
+            //std::cout<<"client message: "<<buffer<<std::endl;
             if (recv_result.is_err() || recv_result.value() == 0) {
+            //std::cout<<"connection_alive: "<<connection_alive<<std::endl;
             connection_alive = false;
             break;
             }
@@ -752,6 +797,7 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
             successful_sends++;
             }
 
+            //std::cout<<"successful_sends cnt: "<<successful_sends<<std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
     });
@@ -773,15 +819,18 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
             const char* msg = "heartbeat";
             auto send_result = client_socket.send(msg, strlen(msg));
             if (send_result.is_err()) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::this_thread::sleep_for(std::chrono::seconds(20));
             }
+            //std::this_thread::sleep_for(std::chrono::seconds(60));
             });
 
     server_thread.join();
     client_thread.join();
 
     EXPECT_TRUE(connection_alive) << "Connection should remain alive with keepalive";
+
     EXPECT_GT(successful_sends, 0) << "Should receive heartbeat messages";
+    //EXPECT_GT(successful_sends, 40) << "Should receive most heartbeat messages";
 
     server_socket.close();
 }
