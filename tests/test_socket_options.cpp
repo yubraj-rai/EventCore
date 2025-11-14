@@ -648,25 +648,33 @@ TEST_F(SocketOptionsTest, KeepaliveDetectDeadPeer_SimulatedDrop) {
     ASSERT_TRUE(server_socket.bind(server_addr).is_ok());
     ASSERT_TRUE(server_socket.listen(1).is_ok());
 
-    std::atomic<bool> connection_failed{false};
-    std::atomic<bool> server_ready{false};
+    std::atomic<bool> connection_failed{false};  // Did we detect failure?
+    std::atomic<bool> server_ready{false};       // Is server ready for client?
 
+    // Possible returns after keepalive timeout:
+    // 1. recv() returns 0 (EOF - connection closed)
+    // 2. recv() returns -1 with errno = ETIMEDOUT
+    // 3. recv() returns -1 with errno = ECONNRESET
     std::thread server_thread([&]() {
+            // Accept incoming connection
             auto accept_result = server_socket.accept();
             ASSERT_TRUE(accept_result.is_ok());
             Socket client_conn = std::move(accept_result.value());
 
+            //server is ready, client can connect now
             server_ready = true;
 
             // Keep connection alive and try to detect failure
             char buffer[128];
             while (!connection_failed) {
-            auto recv_result = client_conn.recv(buffer, sizeof(buffer));
-            if (recv_result.is_err() || recv_result.value() == 0) {
-            connection_failed = true;
-            break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                auto recv_result = client_conn.recv(buffer, sizeof(buffer));
+                // Check if connection is broken, When keepalive detects dead peer, recv() returns error or 0
+                if (recv_result.is_err() || recv_result.value() == 0) {
+                    // Keepalive detected the dead connection! 
+                    connection_failed = true;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             });
 
