@@ -456,28 +456,28 @@ TEST_F(SocketOptionsTest, E2E_ClientServerConnection) {
 
     // Create client in a separate thread
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        client_socket.set_nodelay(true);
-        client_socket.set_keepalive(true);
+            client_socket.set_nodelay(true);
+            client_socket.set_keepalive(true);
 
-        auto connect_result = client_socket.connect(server_addr);
-        EXPECT_TRUE(connect_result.is_ok());
+            auto connect_result = client_socket.connect(server_addr);
+            EXPECT_TRUE(connect_result.is_ok());
 
-        if (connect_result.is_ok()) {
+            if (connect_result.is_ok()) {
             // Verify client options
             int nodelay = get_socket_option<int>(client_socket.fd(), IPPROTO_TCP, TCP_NODELAY);
             EXPECT_EQ(nodelay, 1);
 
             int keepalive = get_socket_option<int>(client_socket.fd(), SOL_SOCKET, SO_KEEPALIVE);
             EXPECT_EQ(keepalive, 1);
-        }
+            }
 
-        client_socket.close();
+            client_socket.close();
     });
 
     // Accept connection on server
@@ -620,9 +620,7 @@ TEST_F(SocketOptionsTest, KeepaliveDefaultParameters) {
     EXPECT_GT(interval, 0);
     EXPECT_GT(count, 0);
 
-    std::cout << "Default keepalive params - Idle: " << idle 
-        << "s, Interval: " << interval 
-        << "s, Count: " << count << std::endl;
+    //std::cout << "Default keepalive params - Idle: " << idle << "s, Interval: " << interval  << "s, Count: " << count << std::endl;
 }
 
 // ============================================================================
@@ -654,43 +652,43 @@ TEST_F(SocketOptionsTest, KeepaliveDetectDeadPeer_SimulatedDrop) {
     std::atomic<bool> server_ready{false};
 
     std::thread server_thread([&]() {
-        auto accept_result = server_socket.accept();
-        ASSERT_TRUE(accept_result.is_ok());
-        Socket client_conn = std::move(accept_result.value());
+            auto accept_result = server_socket.accept();
+            ASSERT_TRUE(accept_result.is_ok());
+            Socket client_conn = std::move(accept_result.value());
 
-        server_ready = true;
+            server_ready = true;
 
-        // Keep connection alive and try to detect failure
-        char buffer[128];
-        while (!connection_failed) {
+            // Keep connection alive and try to detect failure
+            char buffer[128];
+            while (!connection_failed) {
             auto recv_result = client_conn.recv(buffer, sizeof(buffer));
             if (recv_result.is_err() || recv_result.value() == 0) {
-                connection_failed = true;
-                break;
+            connection_failed = true;
+            break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    });
+            }
+            });
 
     // Client connects then abruptly disappears (simulated by closing)
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        auto connect_result = client_socket.connect(server_addr);
-        EXPECT_TRUE(connect_result.is_ok());
+            auto connect_result = client_socket.connect(server_addr);
+            EXPECT_TRUE(connect_result.is_ok());
 
-        // Wait for server to accept
-        while (!server_ready) {
+            // Wait for server to accept
+            while (!server_ready) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
+            }
 
-        // Simulate network drop - abruptly close without proper shutdown
-        ::close(client_socket.release());
-    });
+            // Simulate network drop - abruptly close without proper shutdown
+            ::close(client_socket.release());
+            });
 
     client_thread.join();
 
@@ -727,49 +725,49 @@ TEST_F(SocketOptionsTest, KeepaliveAliveConnection_ProbesSucceed) {
     std::atomic<int> successful_sends{0};
 
     std::thread server_thread([&]() {
-        auto accept_result = server_socket.accept();
-        ASSERT_TRUE(accept_result.is_ok());
-        Socket client_conn = std::move(accept_result.value());
+            auto accept_result = server_socket.accept();
+            ASSERT_TRUE(accept_result.is_ok());
+            Socket client_conn = std::move(accept_result.value());
 
-        // Monitor connection for 10 seconds
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+            // Monitor connection for 10 seconds
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
             char buffer[128];
             auto recv_result = client_conn.recv(buffer, sizeof(buffer));
 
             if (recv_result.is_err() || recv_result.value() == 0) {
-                connection_alive = false;
-                break;
+            connection_alive = false;
+            break;
             }
 
             if (recv_result.is_ok() && recv_result.value() > 0) {
-                successful_sends++;
+            successful_sends++;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+            }
     });
 
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        client_socket.set_keepalive(true);
+            client_socket.set_keepalive(true);
 
-        auto connect_result = client_socket.connect(server_addr);
-        EXPECT_TRUE(connect_result.is_ok());
+            auto connect_result = client_socket.connect(server_addr);
+            EXPECT_TRUE(connect_result.is_ok());
 
-        // Keep connection alive by sending periodic data
-        for (int i = 0; i < 50; ++i) {
+            // Keep connection alive by sending periodic data
+            for (int i = 0; i < 50; ++i) {
             const char* msg = "heartbeat";
             auto send_result = client_socket.send(msg, strlen(msg));
             if (send_result.is_err()) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
-    });
+            }
+            });
 
     server_thread.join();
     client_thread.join();
@@ -808,36 +806,36 @@ TEST_F(SocketOptionsTest, KeepaliveMultipleProbeAttempts) {
     auto death_time = std::chrono::steady_clock::time_point{};
 
     std::thread server_thread([&]() {
-        auto accept_result = server_socket.accept();
-        ASSERT_TRUE(accept_result.is_ok());
-        Socket client_conn = std::move(accept_result.value());
+            auto accept_result = server_socket.accept();
+            ASSERT_TRUE(accept_result.is_ok());
+            Socket client_conn = std::move(accept_result.value());
 
-        auto start = std::chrono::steady_clock::now();
+            auto start = std::chrono::steady_clock::now();
 
-        char buffer[128];
-        while (true) {
+            char buffer[128];
+            while (true) {
             auto recv_result = client_conn.recv(buffer, sizeof(buffer));
             if (recv_result.is_err() || recv_result.value() == 0) {
-                detected_dead = true;
-                death_time = std::chrono::steady_clock::now();
-                break;
+            detected_dead = true;
+            death_time = std::chrono::steady_clock::now();
+            break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    });
+            }
+            });
 
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        client_socket.connect(server_addr);
+            client_socket.connect(server_addr);
 
-        // Abruptly close
-        ::close(client_socket.release());
-    });
+            // Abruptly close
+            ::close(client_socket.release());
+            });
 
     client_thread.join();
 
@@ -877,40 +875,40 @@ TEST_F(SocketOptionsTest, KeepaliveIdleConnection_NoDataTransfer) {
     std::atomic<bool> still_connected{true};
 
     std::thread server_thread([&]() {
-        auto accept_result = server_socket.accept();
-        ASSERT_TRUE(accept_result.is_ok());
-        Socket client_conn = std::move(accept_result.value());
+            auto accept_result = server_socket.accept();
+            ASSERT_TRUE(accept_result.is_ok());
+            Socket client_conn = std::move(accept_result.value());
 
-        // Just monitor connection without any I/O
-        auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
+            // Just monitor connection without any I/O
+            auto start = std::chrono::steady_clock::now();
+            while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {
             // Use SO_ERROR to check connection status
             int error = 0;
             socklen_t len = sizeof(error);
             getsockopt(client_conn.fd(), SOL_SOCKET, SO_ERROR, &error, &len);
 
             if (error != 0) {
-                still_connected = false;
-                break;
+            still_connected = false;
+            break;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        }
-    });
+            }
+            });
 
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        client_socket.set_keepalive(true);
-        client_socket.connect(server_addr);
+            client_socket.set_keepalive(true);
+            client_socket.connect(server_addr);
 
-        // Stay connected for 10 seconds doing nothing
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-    });
+            // Stay connected for 10 seconds doing nothing
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            });
 
     server_thread.join();
     client_thread.join();
@@ -943,36 +941,36 @@ TEST_F(SocketOptionsTest, KeepaliveResetOnDataTransfer) {
     std::atomic<int> data_received{0};
 
     std::thread server_thread([&]() {
-        auto accept_result = server_socket.accept();
-        ASSERT_TRUE(accept_result.is_ok());
-        Socket client_conn = std::move(accept_result.value());
+            auto accept_result = server_socket.accept();
+            ASSERT_TRUE(accept_result.is_ok());
+            Socket client_conn = std::move(accept_result.value());
 
-        char buffer[128];
-        for (int i = 0; i < 20; ++i) {
+            char buffer[128];
+            for (int i = 0; i < 20; ++i) {
             auto recv_result = client_conn.recv(buffer, sizeof(buffer));
             if (recv_result.is_ok() && recv_result.value() > 0) {
-                data_received++;
+            data_received++;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    });
+            }
+            });
 
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        client_socket.connect(server_addr);
+            client_socket.connect(server_addr);
 
-        // Send data every 3 seconds (before keepalive idle timeout of 5s)
-        for (int i = 0; i < 5; ++i) {
+            // Send data every 3 seconds (before keepalive idle timeout of 5s)
+            for (int i = 0; i < 5; ++i) {
             const char* msg = "keepalive_reset";
             client_socket.send(msg, strlen(msg));
             std::this_thread::sleep_for(std::chrono::seconds(3));
-        }
-    });
+            }
+            });
 
     server_thread.join();
     client_thread.join();
@@ -1060,34 +1058,34 @@ TEST_F(SocketOptionsTest, KeepaliveBothEnds) {
     std::atomic<bool> both_sides_keepalive{false};
 
     std::thread server_thread([&]() {
-        auto accept_result = server_socket.accept();
-        ASSERT_TRUE(accept_result.is_ok());
-        Socket client_conn = std::move(accept_result.value());
+            auto accept_result = server_socket.accept();
+            ASSERT_TRUE(accept_result.is_ok());
+            Socket client_conn = std::move(accept_result.value());
 
-        int keepalive = get_socket_option<int>(client_conn.fd(), SOL_SOCKET, SO_KEEPALIVE);
-        if (keepalive == 1) {
+            int keepalive = get_socket_option<int>(client_conn.fd(), SOL_SOCKET, SO_KEEPALIVE);
+            if (keepalive == 1) {
             both_sides_keepalive = true;
-        }
+            }
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-    });
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            });
 
     std::thread client_thread([&]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        auto client_result = Socket::create_tcp();
-        ASSERT_TRUE(client_result.is_ok());
-        Socket client_socket = std::move(client_result.value());
+            auto client_result = Socket::create_tcp();
+            ASSERT_TRUE(client_result.is_ok());
+            Socket client_socket = std::move(client_result.value());
 
-        client_socket.set_keepalive(true);
-        setsockopt(client_socket.fd(), IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
-        setsockopt(client_socket.fd(), IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
-        setsockopt(client_socket.fd(), IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
+            client_socket.set_keepalive(true);
+            setsockopt(client_socket.fd(), IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+            setsockopt(client_socket.fd(), IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+            setsockopt(client_socket.fd(), IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
 
-        client_socket.connect(server_addr);
+            client_socket.connect(server_addr);
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-    });
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            });
 
     server_thread.join();
     client_thread.join();
