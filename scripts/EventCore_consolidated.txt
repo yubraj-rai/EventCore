@@ -1,0 +1,4264 @@
+────────────────────────────────────────────
+yubraj@T490:EventCore$ tree
+.
+├── cmake
+│   ├── cmake_uninstall.cmake.in
+│   ├── CompilerOptions.cmake
+│   ├── EventCoreConfig.cmake.in
+│   ├── eventcore.pc.in
+│   ├── FindDependencies.cmake
+│   └── InstallConfig.cmake
+├── CMakeLists.txt
+├── EventCore_consolidated.txt
+├── examples
+│   ├── CMakeLists.txt
+│   ├── example_server.cpp
+│   ├── nagle-algorithm
+│   │   ├── client.cc
+│   │   └── server.cc
+│   ├── simple_api.cpp
+│   └── static_file_server.cpp
+├── generate.sh
+├── include
+│   └── eventcore
+│       ├── core
+│       │   ├── logger.h
+│       │   ├── noncopyable.h
+│       │   └── result.h
+│       ├── http
+│       │   ├── connection.h
+│       │   ├── parser.h
+│       │   ├── request.h
+│       │   ├── response.h
+│       │   └── router.h
+│       ├── net
+│       │   ├── address.h
+│       │   ├── buffer.h
+│       │   ├── poller.h
+│       │   └── socket.h
+│       ├── server
+│       │   ├── config.h
+│       │   ├── connection_pool.h
+│       │   ├── server.h
+│       │   └── worker.h
+│       └── thread
+│           ├── blocking_queue.h
+│           └── thread_pool.h
+├── src
+│   ├── core
+│   │   └── logger.cpp
+│   ├── http
+│   │   ├── connection.cpp
+│   │   ├── parser.cpp
+│   │   ├── request.cpp
+│   │   ├── response.cpp
+│   │   └── router.cpp
+│   ├── main.cpp
+│   ├── net
+│   │   ├── address.cpp
+│   │   ├── buffer.cpp
+│   │   ├── poller.cpp
+│   │   └── socket.cpp
+│   ├── server
+│   │   ├── connection_pool.cpp
+│   │   ├── server.cpp
+│   │   └── worker.cpp
+│   └── thread
+│       └── thread_pool.cpp
+└── tests
+    ├── CMakeLists.txt
+    ├── test_http.cpp
+    ├── test_net.cpp
+    ├── test_server.cpp
+    └── test_thread.cpp
+
+
+File: ./cmake/cmake_uninstall.cmake.in
+────────────────────────────────────────────
+if(NOT EXISTS "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+    message(FATAL_ERROR "Cannot find install manifest: @CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+endif()
+
+file(READ "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt" files)
+string(REGEX REPLACE "\n" ";" files "${files}")
+
+foreach(file ${files})
+    message(STATUS "Uninstalling $ENV{DESTDIR}${file}")
+    if(EXISTS "$ENV{DESTDIR}${file}")
+        execute_process(
+            COMMAND @CMAKE_COMMAND@ -E remove "$ENV{DESTDIR}${file}"
+            RESULT_VARIABLE result
+        )
+        if(NOT result EQUAL 0)
+            message(FATAL_ERROR "Failed to remove file: $ENV{DESTDIR}${file}")
+        endif()
+    else()
+        message(STATUS "File $ENV{DESTDIR}${file} does not exist.")
+    endif()
+endforeach()
+
+
+
+────────────────────────────────────────────
+File: ./cmake/CompilerOptions.cmake
+────────────────────────────────────────────
+# Compiler warning options
+function(set_compiler_warnings target_name)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${target_name} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wnon-virtual-dtor
+            -Wold-style-cast
+            -Wcast-align
+            -Wunused
+            -Woverloaded-virtual
+            -Wconversion
+            -Wsign-conversion
+            -Wnull-dereference
+            -Wdouble-promotion
+            -Wformat=2
+        )
+        
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+            target_compile_options(${target_name} PRIVATE
+                -Wmisleading-indentation
+                -Wduplicated-cond
+                -Wduplicated-branches
+                -Wlogical-op
+                -Wuseless-cast
+            )
+        endif()
+        
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_compile_options(${target_name} PRIVATE
+                -Wthread-safety
+                -Wloop-analysis
+            )
+        endif()
+    elseif(MSVC)
+        target_compile_options(${target_name} PRIVATE
+            /W4
+            /permissive-
+            /wd4100 # unreferenced formal parameter
+            /wd4127 # conditional expression is constant
+            /wd4324 # structure was padded due to alignment specifier
+        )
+    endif()
+endfunction()
+
+# Platform-specific options
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+    
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -DDEBUG -D_DEBUG")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_ASSERTIONS")
+    else()
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
+        # Link Time Optimization
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.0)
+            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
+        endif()
+    endif()
+    
+    # Position Independent Code for shared libraries
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    
+    # Visibility settings
+    set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+endif()
+
+# Set compiler warnings for all targets
+function(eventcore_setup_target target)
+    set_compiler_warnings(${target})
+    
+    # Set C++ standard properties
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 14
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    
+    # Add include directories
+    target_include_directories(${target} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+endfunction()
+
+
+
+────────────────────────────────────────────
+File: ./cmake/EventCoreConfig.cmake.in
+────────────────────────────────────────────
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find dependencies
+find_dependency(Threads)
+
+# Import targets
+include("${CMAKE_CURRENT_LIST_DIR}/EventCoreTargets.cmake")
+
+# Check that targets are available
+if(NOT TARGET EventCore::eventcore_static)
+    message(FATAL_ERROR "EventCore static library target not found")
+endif()
+
+if(@BUILD_SHARED_LIBS@ AND NOT TARGET EventCore::eventcore)
+    message(FATAL_ERROR "EventCore shared library target not found")
+endif()
+
+# Version check
+check_required_components(EventCore)
+
+
+
+────────────────────────────────────────────
+File: ./cmake/eventcore.pc.in
+────────────────────────────────────────────
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: @PROJECT_NAME@
+Description: @PROJECT_DESCRIPTION@
+Version: @PROJECT_VERSION@
+URL: @PROJECT_URL@
+
+Requires: 
+Libs: -L${libdir} -leventcore
+Cflags: -I${includedir} -std=c++14 -pthread
+
+
+
+────────────────────────────────────────────
+File: ./cmake/FindDependencies.cmake
+────────────────────────────────────────────
+# Find required dependencies
+find_package(Threads REQUIRED)
+
+# Optional dependencies with configuration options
+option(ENABLE_SSL "Enable SSL support" OFF)
+option(ENABLE_ZLIB "Enable compression support" OFF)
+
+if(ENABLE_SSL)
+    find_package(OpenSSL REQUIRED)
+    if(OpenSSL_FOUND)
+        message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+        add_definitions(-DEVENTCORE_SSL_ENABLED)
+    else()
+        message(WARNING "OpenSSL not found - disabling SSL support")
+        set(ENABLE_SSL OFF)
+    endif()
+endif()
+
+if(ENABLE_ZLIB)
+    find_package(ZLIB REQUIRED)
+    if(ZLIB_FOUND)
+        message(STATUS "Zlib found: ${ZLIB_VERSION_STRING}")
+        add_definitions(-DEVENTCORE_ZLIB_ENABLED)
+    else()
+        message(WARNING "Zlib not found - disabling compression support")
+        set(ENABLE_ZLIB OFF)
+    endif()
+endif()
+
+# Test dependencies
+if(BUILD_TESTS)
+    find_package(GTest QUIET)
+    if(GTest_FOUND)
+        message(STATUS "Google Test found: ${GTEST_VERSION}")
+    else()
+        message(WARNING "Google Test not found - disabling tests")
+        set(BUILD_TESTS OFF)
+    endif()
+endif()
+
+# Benchmark dependencies
+if(BUILD_BENCHMARKS)
+    find_package(benchmark QUIET)
+    if(benchmark_FOUND)
+        message(STATUS "Google Benchmark found")
+    else()
+        message(WARNING "Google Benchmark not found - disabling benchmarks")
+        set(BUILD_BENCHMARKS OFF)
+    endif()
+endif()
+
+# Print dependency summary
+message(STATUS "")
+message(STATUS "Dependency Summary:")
+message(STATUS "  Threads: YES")
+message(STATUS "  SSL Support: ${ENABLE_SSL}")
+message(STATUS "  Zlib Support: ${ENABLE_ZLIB}")
+message(STATUS "  Tests: ${BUILD_TESTS}")
+message(STATUS "  Benchmarks: ${BUILD_BENCHMARKS}")
+message(STATUS "")
+
+
+
+────────────────────────────────────────────
+File: ./cmake/InstallConfig.cmake
+────────────────────────────────────────────
+# Installation configuration for EventCore
+
+# GNU install directories
+include(GNUInstallDirs)
+
+# Install libraries
+install(TARGETS eventcore_static
+    EXPORT EventCoreTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+if(BUILD_SHARED_LIBS)
+    install(TARGETS eventcore
+        EXPORT EventCoreTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
+# Install executable
+install(TARGETS eventcore_server
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# Install headers
+install(DIRECTORY include/eventcore
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
+)
+
+# Install export targets
+install(EXPORT EventCoreTargets
+    FILE EventCoreTargets.cmake
+    NAMESPACE EventCore::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/EventCore
+)
+
+
+
+────────────────────────────────────────────
+File: ./CMakeLists.txt
+────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.12)
+project(EventCore VERSION 1.0.0 LANGUAGES CXX)
+
+set(PROJECT_DESCRIPTION "High-performance C++14 HTTP Server Framework")
+set(PROJECT_URL "https://github.com/yubraj-rai/EventCore")
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Include modules
+include(CompilerOptions)
+include(FindDependencies)
+
+# Build options
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+option(BUILD_TESTS "Build tests" ON)
+option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(EVENTCORE_SOURCES
+    src/core/logger.cpp
+    src/net/socket.cpp
+    src/net/address.cpp
+    src/net/buffer.cpp
+    src/net/poller.cpp
+    src/http/request.cpp
+    src/http/response.cpp
+    src/http/parser.cpp
+    src/http/router.cpp
+    src/http/connection.cpp
+    src/thread/thread_pool.cpp
+    src/server/server.cpp
+    src/server/worker.cpp
+    src/server/connection_pool.cpp
+)
+
+# Static library
+add_library(eventcore_static STATIC ${EVENTCORE_SOURCES})
+target_link_libraries(eventcore_static PUBLIC Threads::Threads)
+target_include_directories(eventcore_static PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+set_target_properties(eventcore_static PROPERTIES
+    OUTPUT_NAME eventcore_static
+    VERSION ${PROJECT_VERSION}
+    SOVERSION 1
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+)
+
+# Shared library
+if(BUILD_SHARED_LIBS)
+    add_library(eventcore SHARED ${EVENTCORE_SOURCES})
+    target_link_libraries(eventcore PUBLIC Threads::Threads)
+    target_include_directories(eventcore PUBLIC 
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    set_target_properties(eventcore PROPERTIES
+        VERSION ${PROJECT_VERSION}
+        SOVERSION 1
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    )
+endif()
+
+# Executable
+add_executable(eventcore_server src/main.cpp)
+target_link_libraries(eventcore_server PRIVATE eventcore_static)
+set_target_properties(eventcore_server PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Subdirectories
+if(BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+if(BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
+# Installation
+include(cmake/InstallConfig.cmake)
+
+# Package configuration
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EventCoreConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfig.cmake"
+    @ONLY
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfigVersion.cmake"
+    DESTINATION lib/cmake/EventCore
+)
+
+# pkg-config
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/eventcore.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/eventcore.pc"
+    @ONLY
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/eventcore.pc"
+    DESTINATION lib/pkgconfig
+)
+
+# Configuration summary
+message(STATUS "")
+message(STATUS "EventCore Configuration Summary")
+message(STATUS "  Version: ${PROJECT_VERSION}")
+message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Install Prefix: ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "")
+message(STATUS "  Build Shared Libraries: ${BUILD_SHARED_LIBS}")
+message(STATUS "  Build Tests: ${BUILD_TESTS}")
+message(STATUS "  Build Examples: ${BUILD_EXAMPLES}")
+message(STATUS "  Build Benchmarks: ${BUILD_BENCHMARKS}")
+message(STATUS "")
+
+# Uninstall target
+if(NOT TARGET uninstall)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        IMMEDIATE @ONLY
+    )
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
+    )
+endif()
+
+
+
+────────────────────────────────────────────
+File: ./EventCore_consolidated.txt
+────────────────────────────────────────────
+
+
+
+────────────────────────────────────────────
+File: ./examples/CMakeLists.txt
+────────────────────────────────────────────
+# Examples for EventCore
+
+# Example server
+add_executable(example_server example_server.cpp)
+target_link_libraries(example_server PRIVATE eventcore_static)
+
+# Simple API example
+add_executable(simple_api simple_api.cpp)
+target_link_libraries(simple_api PRIVATE eventcore_static)
+
+# Static file server example
+add_executable(static_file_server static_file_server.cpp)
+target_link_libraries(static_file_server PRIVATE eventcore_static)
+
+# Set output directories
+set_target_properties(
+    example_server 
+    simple_api 
+    static_file_server
+    PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/examples
+)
+
+# Install examples
+install(TARGETS 
+    example_server 
+    simple_api 
+    static_file_server
+    RUNTIME DESTINATION bin/examples
+)
+
+
+
+────────────────────────────────────────────
+File: ./examples/example_server.cpp
+────────────────────────────────────────────
+#include "eventcore/server/server.h"
+#include "eventcore/core/logger.h"
+#include <iostream>
+#include <csignal>
+
+std::atomic<bool> running{true};
+
+void signal_handler(int signal) {
+    std::cout << "Received signal " << signal << ", shutting down..." << std::endl;
+    running = false;
+}
+
+int main() {
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    try {
+        eventcore::server::Config config;
+        config.port = 8080;
+        config.num_workers = 2;
+        config.num_threads_per_worker = 2;
+
+        eventcore::server::Server server(config);
+
+        server.router().get("/api/users", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp;
+                resp.set_status(200);
+                resp.set_content_type("application/json");
+                resp.set_body(R"([
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+                {"id": 3, "name": "Charlie"}
+            ])");
+                return resp;
+                });
+
+        server.router().get("/api/users/{id}", [](const eventcore::http::Request& req) {
+                std::string path = req.path();
+                size_t last_slash = path.find_last_of('/');
+                std::string id = path.substr(last_slash + 1);
+
+                eventcore::http::Response resp;
+                resp.set_status(200);
+                resp.set_content_type("application/json");
+                resp.set_body(R"({"id": )" + id + R"(, "name": "User )" + id + "\"}");
+                return resp;
+                });
+
+        server.router().post("/api/users", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp;
+                resp.set_status(201);
+                resp.set_content_type("application/json");
+                resp.set_body(R"({"status": "created", "data": )" + req.body() + "}");
+                return resp;
+                });
+
+        std::cout << "Starting example server on port 8080..." << std::endl;
+        std::cout << "Try these endpoints:" << std::endl;
+        std::cout << "  GET  http://localhost:8080/api/users" << std::endl;
+        std::cout << "  GET  http://localhost:8080/api/users/123" << std::endl;
+        std::cout << "  POST http://localhost:8080/api/users" << std::endl;
+        std::cout << "Press Ctrl+C to stop" << std::endl;
+
+        server.start();
+
+        while (running) std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        server.stop();
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+
+
+
+────────────────────────────────────────────
+File: ./examples/nagle-algorithm/client.cc
+────────────────────────────────────────────
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <iostream>
+#include <cstring>
+
+class TCPClient {
+    private:
+        int sockfd;
+
+    public:
+        TCPClient() : sockfd(-1) {}
+
+        ~TCPClient() {
+            if (sockfd >= 0) {
+                close(sockfd);
+            }
+        }
+
+        bool connect(const char* host, int port, bool no_delay = true) {
+            // Create socket
+            sockfd = socket(AF_INET, SOCK_STREAM, 0);
+            if (sockfd < 0) {
+                std::cerr << "Failed to create socket" << std::endl;
+                return false;
+            }
+
+            // Set TCP_NODELAY before connecting
+            if (no_delay) {
+                int flag = 1;
+                if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, 
+                            &flag, sizeof(int)) < 0) {
+                    std::cerr << "Failed to set TCP_NODELAY" << std::endl;
+                    close(sockfd);
+                    sockfd = -1;
+                    return false;
+                }
+            }
+
+            // Setup server address
+            struct sockaddr_in server_addr;
+            memset(&server_addr, 0, sizeof(server_addr));
+            server_addr.sin_family = AF_INET;
+            server_addr.sin_port = htons(port);
+
+            if (inet_pton(AF_INET, host, &server_addr.sin_addr) <= 0) {
+                std::cerr << "Invalid address" << std::endl;
+                close(sockfd);
+                sockfd = -1;
+                return false;
+            }
+
+            // Connect to server
+            if (::connect(sockfd, (struct sockaddr*)&server_addr, 
+                        sizeof(server_addr)) < 0) {
+                std::cerr << "Connection failed" << std::endl;
+                close(sockfd);
+                sockfd = -1;
+                return false;
+            }
+
+            std::cout << "Connected to " << host << ":" << port << std::endl;
+            std::cout << "TCP_NODELAY: " << (no_delay ? "ON" : "OFF") << std::endl;
+            return true;
+        }
+
+        ssize_t send(const char* data, size_t len) {
+            return ::send(sockfd, data, len, 0);
+        }
+
+        ssize_t receive(char* buffer, size_t len) {
+            return ::recv(sockfd, buffer, len, 0);
+        }
+};
+
+// Example usage
+int main() {
+    TCPClient client;
+
+    // Connect with TCP_NODELAY enabled
+    if (!client.connect("127.0.0.1", 8080, true)) {
+        return 1;
+    }
+
+    // Send small messages (won't be delayed by Nagle)
+    const char* msg1 = "Hello";
+    const char* msg2 = "World";
+
+    client.send(msg1, strlen(msg1));
+    client.send(msg2, strlen(msg2));
+
+    return 0;
+}
+
+
+
+────────────────────────────────────────────
+File: ./examples/nagle-algorithm/server.cc
+────────────────────────────────────────────
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <iostream>
+#include <cstring>
+
+class TCPServer {
+    private:
+        int server_fd;
+        int port;
+
+    public:
+        TCPServer(int port) : server_fd(-1), port(port) {}
+
+        ~TCPServer() {
+            if (server_fd >= 0) {
+                close(server_fd);
+            }
+        }
+
+        bool start(bool no_delay = true) {
+            // Create socket
+            server_fd = socket(AF_INET, SOCK_STREAM, 0);
+            if (server_fd < 0) {
+                std::cerr << "Failed to create socket" << std::endl;
+                return false;
+            }
+
+            // Set SO_REUSEADDR
+            int opt = 1;
+            if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, 
+                        &opt, sizeof(opt)) < 0) {
+                std::cerr << "Failed to set SO_REUSEADDR" << std::endl;
+                close(server_fd);
+                return false;
+            }
+
+            // Bind to port
+            struct sockaddr_in address;
+            memset(&address, 0, sizeof(address));
+            address.sin_family = AF_INET;
+            address.sin_addr.s_addr = INADDR_ANY;
+            address.sin_port = htons(port);
+
+            if (bind(server_fd, (struct sockaddr*)&address, 
+                        sizeof(address)) < 0) {
+                std::cerr << "Bind failed" << std::endl;
+                close(server_fd);
+                return false;
+            }
+
+            // Listen
+            if (listen(server_fd, 10) < 0) {
+                std::cerr << "Listen failed" << std::endl;
+                close(server_fd);
+                return false;
+            }
+
+            std::cout << "Server listening on port " << port << std::endl;
+            return true;
+        }
+
+        int acceptClient(bool no_delay = true) {
+            struct sockaddr_in client_addr;
+            socklen_t client_len = sizeof(client_addr);
+
+            int client_fd = accept(server_fd, 
+                    (struct sockaddr*)&client_addr, 
+                    &client_len);
+
+            if (client_fd < 0) {
+                std::cerr << "Accept failed" << std::endl;
+                return -1;
+            }
+
+            // Set TCP_NODELAY on client socket
+            if (no_delay) {
+                int flag = 1;
+                if (setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, 
+                            &flag, sizeof(int)) < 0) {
+                    std::cerr << "Failed to set TCP_NODELAY on client" 
+                        << std::endl;
+                    close(client_fd);
+                    return -1;
+                }
+            }
+
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &client_addr.sin_addr, 
+                    client_ip, INET_ADDRSTRLEN);
+
+            std::cout << "Client connected from " << client_ip 
+                << ":" << ntohs(client_addr.sin_port) << std::endl;
+            std::cout << "TCP_NODELAY: " << (no_delay ? "ON" : "OFF") 
+                << std::endl;
+
+            return client_fd;
+        }
+};
+
+// Example usage
+int main() {
+    TCPServer server(8080);
+
+    if (!server.start(true)) {  // Enable TCP_NODELAY
+        return 1;
+    }
+
+    while (true) {
+        int client_fd = server.acceptClient(true);
+        if (client_fd < 0) {
+            continue;
+        }
+
+        // Handle client...
+        char buffer[1024];
+        ssize_t bytes = recv(client_fd, buffer, sizeof(buffer), 0);
+        printf("%s\n", buffer) ;
+        if (bytes > 0) {
+            send(client_fd, buffer, bytes, 0);  // Echo back
+        }
+
+        close(client_fd);
+    }
+
+    return 0;
+}
+
+
+
+────────────────────────────────────────────
+File: ./examples/simple_api.cpp
+────────────────────────────────────────────
+#include "eventcore/server/server.h"
+#include "eventcore/core/logger.h"
+#include <iostream>
+#include <csignal>
+
+std::atomic<bool> running{true};
+
+void signal_handler(int signal) {
+    std::cout << "Received signal " << signal << ", shutting down..." << std::endl;
+    running = false;
+}
+
+int main() {
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    try {
+        eventcore::server::Config config;
+        config.port = 8080;
+        config.num_workers = 2;
+        config.num_threads_per_worker = 2;
+
+        eventcore::server::Server server(config);
+
+        server.router().get("/api/users", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp;
+                resp.set_status(200);
+                resp.set_content_type("application/json");
+                resp.set_body(R"([
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+                {"id": 3, "name": "Charlie"}
+            ])");
+                return resp;
+                });
+
+        server.router().get("/api/users/{id}", [](const eventcore::http::Request& req) {
+                std::string path = req.path();
+                size_t last_slash = path.find_last_of('/');
+                std::string id = path.substr(last_slash + 1);
+
+                eventcore::http::Response resp;
+                resp.set_status(200);
+                resp.set_content_type("application/json");
+                resp.set_body(R"({"id": )" + id + R"(, "name": "User )" + id + "\"}");
+                return resp;
+                });
+
+        server.router().post("/api/users", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp;
+                resp.set_status(201);
+                resp.set_content_type("application/json");
+                resp.set_body(R"({"status": "created", "data": )" + req.body() + "}");
+                return resp;
+                });
+
+        std::cout << "Starting example server on port 8080..." << std::endl;
+        std::cout << "Try these endpoints:" << std::endl;
+        std::cout << "  GET  http://localhost:8080/api/users" << std::endl;
+        std::cout << "  GET  http://localhost:8080/api/users/123" << std::endl;
+        std::cout << "  POST http://localhost:8080/api/users" << std::endl;
+        std::cout << "Press Ctrl+C to stop" << std::endl;
+
+        server.start();
+
+        while (running) std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        server.stop();
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+
+
+
+────────────────────────────────────────────
+File: ./examples/static_file_server.cpp
+────────────────────────────────────────────
+#include "eventcore/server/server.h"
+#include "eventcore/core/logger.h"
+#include <fstream>
+#include <sstream>
+#include <iostream>
+
+std::string read_file(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) throw std::runtime_error("Cannot open file: " + path);
+    std::stringstream buffer; buffer << file.rdbuf(); return buffer.str();
+}
+
+std::string get_content_type(const std::string& path) {
+    if (path.find(".html") != std::string::npos) return "text/html";
+    if (path.find(".css") != std::string::npos) return "text/css";
+    if (path.find(".js") != std::string::npos) return "application/javascript";
+    if (path.find(".json") != std::string::npos) return "application/json";
+    if (path.find(".png") != std::string::npos) return "image/png";
+    if (path.find(".jpg") != std::string::npos || path.find(".jpeg") != std::string::npos) return "image/jpeg";
+    return "text/plain";
+}
+
+int main() {
+    try {
+        eventcore::server::Config config;
+        config.port = 8080;
+
+        eventcore::server::Server server(config);
+
+        server.router().get(".*", [](const eventcore::http::Request& req) {
+                std::string path = req.path();
+                if (path == "/") path = "/index.html";
+                std::string file_path = "." + path;
+                if (file_path.find("..") != std::string::npos) return eventcore::http::Response::make_404();
+                try {
+                std::string content = read_file(file_path);
+                eventcore::http::Response resp;
+                resp.set_status(200);
+                resp.set_content_type(get_content_type(file_path));
+                resp.set_body(content);
+                return resp;
+                } catch (const std::exception&) {
+                return eventcore::http::Response::make_404();
+                }
+                });
+
+        LOG_INFO("Starting static file server on port 8080...");
+        LOG_INFO("Serving files from current directory");
+        server.start();
+
+        std::cout << "Press Enter to stop the server..." << std::endl;
+        std::cin.get();
+
+        server.stop();
+
+    } catch (const std::exception& e) {
+        LOG_ERROR("Server error: ", e.what());
+        return 1;
+    }
+
+    return 0;
+}
+
+
+
+────────────────────────────────────────────
+File: ./generate.sh
+────────────────────────────────────────────
+#!/bin/bash
+
+# Output file
+OUTPUT="EventCore_consolidated.txt"
+
+# Empty the output file if it exists
+> "$OUTPUT"
+
+# Recursively find all files
+find . -type f | sort | while read -r file; do
+    echo "────────────────────────────────────────────" >> "$OUTPUT"
+    echo "File: $file" >> "$OUTPUT"
+    echo "────────────────────────────────────────────" >> "$OUTPUT"
+    cat "$file" >> "$OUTPUT"
+    echo -e "\n\n" >> "$OUTPUT"
+done
+
+echo "All files consolidated into $OUTPUT"
+
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/core/logger.h
+────────────────────────────────────────────
+#pragma once
+#include <string>
+#include <memory>
+#include <mutex>
+#include <fstream>
+#include <sstream>
+#include <chrono>
+#include <iomanip>
+#include <utility>
+
+namespace eventcore {
+
+enum class LogLevel { 
+    LEVEL_DEBUG = 0, 
+    LEVEL_INFO = 1, 
+    LEVEL_WARN = 2, 
+    LEVEL_ERROR = 3 
+};
+
+class Logger {
+public:
+    static Logger& instance();
+    void set_level(LogLevel level);
+    void set_file(const std::string& filename);
+    void debug(const std::string& msg);
+    void info(const std::string& msg);
+    void warn(const std::string& msg);
+    void error(const std::string& msg);
+
+private:
+    Logger();
+    void write(LogLevel level, const std::string& msg);
+    std::string format_time();
+    const char* level_string(LogLevel level);
+
+    LogLevel level_ = LogLevel::LEVEL_INFO;
+    std::mutex mutex_;
+    std::unique_ptr<std::ofstream> file_;
+};
+
+namespace detail {
+
+// Recursive helper for variadic arguments
+inline void append_to_stream(std::stringstream&) {}
+
+template<typename T, typename... Args>
+void append_to_stream(std::stringstream& ss, T&& first, Args&&... rest) {
+    ss << std::forward<T>(first);
+    append_to_stream(ss, std::forward<Args>(rest)...);
+}
+
+} // namespace detail
+
+// Variadic macros replacement
+#define LOG_DEBUG(...) do { \
+    std::stringstream ss; \
+    eventcore::detail::append_to_stream(ss, __VA_ARGS__); \
+    eventcore::Logger::instance().debug(ss.str()); \
+} while(0)
+
+#define LOG_INFO(...) do { \
+    std::stringstream ss; \
+    eventcore::detail::append_to_stream(ss, __VA_ARGS__); \
+    eventcore::Logger::instance().info(ss.str()); \
+} while(0)
+
+#define LOG_WARN(...) do { \
+    std::stringstream ss; \
+    eventcore::detail::append_to_stream(ss, __VA_ARGS__); \
+    eventcore::Logger::instance().warn(ss.str()); \
+} while(0)
+
+#define LOG_ERROR(...) do { \
+    std::stringstream ss; \
+    eventcore::detail::append_to_stream(ss, __VA_ARGS__); \
+    eventcore::Logger::instance().error(ss.str()); \
+} while(0)
+
+} // namespace eventcore
+
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/core/noncopyable.h
+────────────────────────────────────────────
+#pragma once
+
+namespace eventcore {
+
+    class NonCopyable {
+        protected:
+            NonCopyable() = default;
+            ~NonCopyable() = default;
+
+            NonCopyable(NonCopyable&&) = default;
+            NonCopyable& operator=(NonCopyable&&) = default;
+
+        private:
+            NonCopyable(const NonCopyable&) = delete;
+            NonCopyable& operator=(const NonCopyable&) = delete;
+    };
+
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/core/result.h
+────────────────────────────────────────────
+#pragma once
+#include <string>
+#include <memory>
+#include <utility>
+
+namespace eventcore {
+
+    template<typename T>
+        class Result {
+            public:
+                static Result<T> Ok(T value) {
+                    Result<T> result;
+                    result.value_ = std::make_unique<T>(std::move(value));
+                    result.ok_ = true;
+                    return result;
+                }
+
+                static Result<T> Err(std::string error) {
+                    Result<T> result;
+                    result.error_ = std::move(error);
+                    result.ok_ = false;
+                    return result;
+                }
+
+                bool is_ok() const { return ok_; }
+                bool is_err() const { return !ok_; }
+                const T& value() const { return *value_; }
+                T& value() { return *value_; }
+                const std::string& error() const { return error_; }
+                T value_or(T default_value) const {
+                    return ok_ ? *value_ : std::move(default_value);
+                }
+
+            private:
+                std::unique_ptr<T> value_;
+                std::string error_;
+                bool ok_ = false;
+        };
+
+    // Specialization for void
+    template<>
+        class Result<void> {
+            public:
+                static Result<void> Ok() {
+                    Result<void> result;
+                    result.ok_ = true;
+                    return result;
+                }
+
+                static Result<void> Err(std::string error) {
+                    Result<void> result;
+                    result.error_ = std::move(error);
+                    result.ok_ = false;
+                    return result;
+                }
+
+                bool is_ok() const { return ok_; }
+                bool is_err() const { return !ok_; }
+                const std::string& error() const { return error_; }
+
+            private:
+                std::string error_;
+                bool ok_ = false;
+        };
+
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/http/connection.h
+────────────────────────────────────────────
+#pragma once
+#include "../core/noncopyable.h"
+#include "../net/socket.h"
+#include "../net/buffer.h"
+#include "parser.h"
+#include "request.h"
+#include "response.h"
+#include <memory>
+#include <functional>
+#include <chrono>
+
+namespace eventcore {
+    namespace http {
+
+        class Connection : public NonCopyable, public std::enable_shared_from_this<Connection> {
+            public:
+                using ConnectionPtr = std::shared_ptr<Connection>;
+                using RequestHandler = std::function<Response(const Request&)>;
+                using CloseCallback = std::function<void(ConnectionPtr)>;
+
+                Connection(net::Socket socket, RequestHandler handler);
+                ~Connection();
+                void reset(int fd);
+                void update_activity();
+                bool is_idle(std::chrono::seconds timeout) const;
+                void start();
+                void handle_read();
+                void handle_write();
+                void send(const Response& response);
+                void shutdown();
+                void force_close();
+                void set_close_callback(CloseCallback cb) { close_callback_ = cb; }
+                bool is_connected() const { return state_ == kConnected; }
+                int fd() const { return socket_.fd(); }
+
+            private:
+                enum State { kConnecting, kConnected, kDisconnecting, kDisconnected };
+                void handle_error();
+                void handle_close();
+                void process_request();
+                void send_response(const Response& response);
+
+                std::chrono::steady_clock::time_point last_activity_;
+                net::Socket socket_;
+                State state_;
+                net::Buffer read_buffer_;
+                net::Buffer write_buffer_;
+                Parser parser_;
+                Request request_;
+                RequestHandler request_handler_;
+                CloseCallback close_callback_;
+        };
+
+        using ConnectionPtr = std::shared_ptr<Connection>;
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/http/parser.h
+────────────────────────────────────────────
+#pragma once
+#include "request.h"
+#include "../net/buffer.h"
+
+namespace eventcore {
+    namespace http {
+
+        class Parser {
+            public:
+                enum State { kExpectRequestLine, kExpectHeaders, kExpectBody, kComplete };
+                Parser();
+                bool parse_request(net::Buffer* buffer, Request* request);
+                bool is_complete() const { return state_ == kComplete; }
+                void reset();
+
+            private:
+                bool parse_request_line(const char* begin, const char* end);
+                bool parse_headers(net::Buffer* buffer);
+                bool parse_body(net::Buffer* buffer);
+
+                State state_;
+                Request* request_;
+                size_t content_length_;
+        };
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/http/request.h
+────────────────────────────────────────────
+#pragma once
+#include <string>
+#include <unordered_map>
+
+namespace eventcore {
+    namespace http {
+
+        enum class Method { GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, UNKNOWN };
+        enum class Version { HTTP_1_0, HTTP_1_1, HTTP_2_0, UNKNOWN };
+
+        class Request {
+            public:
+                Method method() const { return method_; }
+                const std::string& path() const { return path_; }
+                const std::string& query() const { return query_; }
+                Version version() const { return version_; }
+                const std::unordered_map<std::string, std::string>& headers() const { return headers_; }
+                const std::string& body() const { return body_; }
+
+                std::string get_header(const std::string& name) const;
+                bool has_header(const std::string& name) const;
+                void set_method(Method method) { method_ = method; }
+                void set_path(const std::string& path) { path_ = path; }
+                void set_query(const std::string& query) { query_ = query; }
+                void set_version(Version version) { version_ = version; }
+                void set_header(const std::string& name, const std::string& value);
+                void set_body(const std::string& body) { body_ = body; }
+                void reset();
+
+                static Method string_to_method(const std::string& str);
+                static std::string method_to_string(Method method);
+                static Version string_to_version(const std::string& str);
+
+            private:
+                Method method_ = Method::UNKNOWN;
+                std::string path_;
+                std::string query_;
+                Version version_ = Version::UNKNOWN;
+                std::unordered_map<std::string, std::string> headers_;
+                std::string body_;
+        };
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/http/response.h
+────────────────────────────────────────────
+#pragma once
+#include <string>
+#include <unordered_map>
+
+namespace eventcore {
+    namespace http {
+
+        class Response {
+            public:
+                Response();
+                int status_code() const { return status_code_; }
+                const std::string& status_message() const { return status_message_; }
+                const std::unordered_map<std::string, std::string>& headers() const { return headers_; }
+                const std::string& body() const { return body_; }
+
+                void set_status(int code, const std::string& message = "");
+                void set_header(const std::string& name, const std::string& value);
+                void set_body(const std::string& body);
+                void append_body(const std::string& data);
+                void set_content_type(const std::string& type);
+                void set_keep_alive(bool keep_alive);
+                std::string to_string() const;
+
+                static Response make_404();
+                static Response make_500();
+                static Response make_json(int code, const std::string& json);
+                static Response make_html(int code, const std::string& html);
+
+            private:
+                int status_code_;
+                std::string status_message_;
+                std::unordered_map<std::string, std::string> headers_;
+                std::string body_;
+                bool keep_alive_ = true;
+                std::string default_status_message(int code) const;
+        };
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/http/router.h
+────────────────────────────────────────────
+#pragma once
+#include "request.h"
+#include "response.h"
+#include <functional>
+#include <unordered_map>
+#include <regex>
+#include <memory>
+
+namespace eventcore {
+    namespace http {
+
+        using Handler = std::function<Response(const Request&)>;
+        using Middleware = std::function<void(Request&, Response&)>;
+
+        class Router {
+            public:
+                void add_route(Method method, const std::string& pattern, Handler handler);
+                void get(const std::string& pattern, Handler handler);
+                void post(const std::string& pattern, Handler handler);
+                void put(const std::string& pattern, Handler handler);
+                void del(const std::string& pattern, Handler handler);
+                void use(Middleware middleware);
+                void use(const std::string& prefix, Middleware middleware);
+                void set_not_found_handler(Handler handler);
+                void set_error_handler(std::function<Response(const std::exception&)> handler);
+                Response route(const Request& request) const;
+
+            private:
+                struct Route {
+                    std::string pattern;
+                    std::regex regex;
+                    Handler handler;
+                    bool is_regex;
+                };
+
+                std::unordered_map<Method, std::vector<Route>> routes_;
+                std::vector<std::pair<std::string, Middleware>> middlewares_;
+                Handler not_found_handler_;
+                std::function<Response(const std::exception&)> error_handler_;
+
+                Response default_404() const;
+                Response default_error(const std::exception& e) const;
+        };
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/net/address.h
+────────────────────────────────────────────
+#pragma once
+#include <string>
+#include <cstdint>
+#include <netinet/in.h>
+
+namespace eventcore {
+    namespace net {
+
+        class Address {
+            public:
+                Address() = default;
+                Address(const std::string& ip, uint16_t port);
+                explicit Address(const struct sockaddr_in& addr);
+
+                std::string ip() const;
+                uint16_t port() const;
+                std::string to_string() const;
+                const struct sockaddr* sockaddr() const;
+                socklen_t socklen() const;
+                static Address from_sockaddr(const struct sockaddr_in& addr);
+
+            private:
+                struct sockaddr_in addr_;
+        };
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/net/buffer.h
+────────────────────────────────────────────
+#pragma once
+#include <vector>
+#include <string>
+#include <cstring>
+#include <algorithm>
+
+namespace eventcore {
+    namespace net {
+
+        class Buffer {
+            public:
+                static constexpr size_t kInitialSize = 1024;
+                static constexpr size_t kPrependSize = 8;
+                static const char kCRLF[];
+
+                explicit Buffer(size_t initial_size = kInitialSize);
+                size_t readable_bytes() const { return write_index_ - read_index_; }
+                size_t writable_bytes() const { return buffer_.size() - write_index_; }
+                size_t prependable_bytes() const { return read_index_; }
+                const char* peek() const { return begin() + read_index_; }
+
+                void retrieve(size_t len);
+                void retrieve_all();
+                std::string retrieve_as_string(size_t len);
+                std::string retrieve_all_as_string();
+                void append(const char* data, size_t len);
+                void append(const std::string& str);
+                void append(const void* data, size_t len);
+                void ensure_writable(size_t len);
+                char* begin_write() { return begin() + write_index_; }
+                const char* begin_write() const { return begin() + write_index_; }
+                void has_written(size_t len) { write_index_ += len; }
+                ssize_t read_from_fd(int fd);
+                const char* find_crlf() const;
+                const char* find_crlf(const char* start) const;
+                const char* find_eol() const;
+                const char* find_eol(const char* start) const;
+
+            private:
+                char* begin() { return &*buffer_.begin(); }
+                const char* begin() const { return &*buffer_.begin(); }
+                void make_space(size_t len);
+
+                std::vector<char> buffer_;
+                size_t read_index_;
+                size_t write_index_;
+        };
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/net/poller.h
+────────────────────────────────────────────
+#pragma once
+#include "../core/noncopyable.h"
+#include <vector>
+#include <unordered_map>
+#include <functional>
+#include <memory>
+
+#ifdef __linux__
+#include <sys/epoll.h>
+#endif
+
+namespace eventcore {
+    namespace net {
+
+        class Poller : public NonCopyable {
+            public:
+                enum Events { kNone = 0, kReadable = 1, kWritable = 2, kError = 4 };
+                using EventCallback = std::function<void(int fd, int events)>;
+
+                virtual ~Poller() = default;
+                virtual bool add(int fd, int events, EventCallback cb) = 0;
+                virtual bool modify(int fd, int events) = 0;
+                virtual bool remove(int fd) = 0;
+                virtual int poll(int timeout_ms) = 0;
+                static std::unique_ptr<Poller> create();
+        };
+
+#ifdef __linux__
+        class EpollPoller : public Poller {
+            public:
+                EpollPoller();
+                ~EpollPoller();
+                bool add(int fd, int events, EventCallback cb) override;
+                bool modify(int fd, int events) override;
+                bool remove(int fd) override;
+                int poll(int timeout_ms) override;
+
+            private:
+                int epfd_;
+                std::vector<struct epoll_event> events_;
+                std::unordered_map<int, EventCallback> callbacks_;
+        };
+#endif
+
+        class SelectPoller : public Poller {
+            public:
+                SelectPoller();
+                ~SelectPoller();
+                bool add(int fd, int events, EventCallback cb) override;
+                bool modify(int fd, int events) override;
+                bool remove(int fd) override;
+                int poll(int timeout_ms) override;
+
+            private:
+                struct FdInfo { int events; EventCallback callback; };
+                std::unordered_map<int, FdInfo> fds_;
+                int max_fd_ = -1;
+        };
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/net/socket.h
+────────────────────────────────────────────
+#pragma once
+#include "../core/noncopyable.h"
+#include "../core/result.h"
+#include "address.h"
+#include <string>
+#include <cstdint>
+
+namespace eventcore {
+    namespace net {
+
+        class Socket : public NonCopyable {
+            public:
+                Socket();
+                explicit Socket(int fd);
+                ~Socket();
+                Socket(Socket&& other) noexcept;
+                Socket& operator=(Socket&& other) noexcept;
+
+                Result<void> bind(const Address& addr);
+                Result<void> listen(int backlog = 1024);
+                Result<Socket> accept();
+                Result<void> connect(const Address& addr);
+                Result<size_t> send(const void* data, size_t len);
+                Result<size_t> recv(void* data, size_t len);
+                Result<void> set_nonblocking(bool enable = true);
+                Result<void> set_reuseaddr(bool enable = true);
+                Result<void> set_reuseport(bool enable = true);
+                Result<void> set_nodelay(bool enable = true);
+                Result<void> set_keepalive(bool enable = true);
+                void shutdown_write();
+                void close();
+
+                int fd() const { return fd_; }
+                bool is_valid() const { return fd_ >= 0; }
+                static Result<Socket> create_tcp();
+                static Result<Socket> create_udp();
+
+            public:
+                int release() {
+                    int fd = fd_;
+                    fd_ = -1;
+                    return fd;
+                }
+
+            private:
+                int fd_ = -1;
+        };
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/server/config.h
+────────────────────────────────────────────
+#pragma once
+
+#include <string>
+#include <cstdint>
+
+namespace eventcore {
+    namespace server {
+
+        struct Config {
+            std::string host = "0.0.0.0";
+            uint16_t port = 8080;
+            int backlog = 4096;  // Increased from 1024
+
+            size_t num_workers = 0;
+            size_t num_threads_per_worker = 4;
+
+            size_t max_connections = 100000;  // Increased from 10000
+            size_t connection_pool_size = 100000;  // NEW
+
+            size_t max_request_size = 1024 * 1024;
+            int keepalive_timeout_sec = 60;
+
+            size_t read_buffer_size = 4096;
+            size_t write_buffer_size = 4096;
+
+            bool tcp_nodelay = true;
+            bool tcp_reuseaddr = true;
+            bool tcp_reuseport = true;  // Changed from false
+
+            int accept_batch_size = 100;  // NEW
+
+            std::string log_file;
+            std::string log_level = "info";
+        };
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/server/connection_pool.h
+────────────────────────────────────────────
+#pragma once
+
+#include "../http/connection.h"
+#include "../core/noncopyable.h"
+#include <vector>
+#include <mutex>
+#include <unordered_map>
+#include <chrono>
+
+namespace eventcore {
+    namespace server {
+
+        class ConnectionPool : public NonCopyable {
+            public:
+                explicit ConnectionPool(size_t size);
+                ~ConnectionPool() = default;
+
+                http::ConnectionPtr acquire(int fd, http::Connection::RequestHandler handler);
+                void release(int fd);
+
+                size_t available() const;
+                size_t total_size() const { return pool_.size(); }
+
+                // Timeout management
+                std::vector<int> get_idle_connections(std::chrono::seconds timeout);
+
+            private:
+                struct PoolEntry {
+                    http::ConnectionPtr conn;
+                    std::chrono::steady_clock::time_point last_used;
+                    bool in_use;
+                };
+
+                std::vector<PoolEntry> pool_;
+                std::vector<size_t> free_indices_;
+                std::unordered_map<int, size_t> fd_to_index_;
+                mutable std::mutex mutex_;
+        };
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/server/server.h
+────────────────────────────────────────────
+#pragma once
+#include "../core/noncopyable.h"
+#include "../net/socket.h"
+#include "../http/router.h"
+#include "connection_pool.h"
+#include "config.h"
+#include "worker.h"
+#include <memory>
+#include <vector>
+#include <atomic>
+
+namespace eventcore {
+    namespace server {
+
+        class Server : public NonCopyable {
+            public:
+                explicit Server(const Config& config = Config());
+                ~Server();
+                void start();
+                void stop();
+                void wait();
+                http::Router& router() { return router_; }
+                const Config& config() const { return config_; }
+                bool is_running() const { return running_; }
+
+            private:
+                void accept_loop();
+                void handle_new_connection(net::Socket client_socket);
+                Worker* next_worker();
+
+                Config config_;
+                ConnectionPool pool_;
+                http::Router router_;
+                net::Socket listen_socket_;
+                std::vector<std::unique_ptr<Worker>> workers_;
+                std::thread accept_thread_;
+                std::atomic<bool> running_{false};
+                std::atomic<size_t> next_worker_idx_{0};
+        };
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/server/worker.h
+────────────────────────────────────────────
+#pragma once
+#include "../core/noncopyable.h"
+#include "../net/poller.h"
+#include "../http/connection.h"
+#include "../http/router.h"
+#include "../thread/thread_pool.h"
+#include "connection_pool.h"
+#include <memory>
+#include <unordered_map>
+#include <atomic>
+
+namespace eventcore {
+    namespace server {
+
+        class Worker : public NonCopyable {
+            public:
+                Worker(const http::Router* router, size_t thread_pool_size = 4, ConnectionPool* pool = nullptr);
+                ~Worker();
+                void start();
+                void stop();
+                void add_connection(http::ConnectionPtr conn);
+                size_t connection_count() const { return connections_.size(); }
+                bool is_running() const { return running_; }
+
+            private:
+                void event_loop();
+                void handle_connection_event(int fd, int events);
+                void remove_connection(int fd);
+                void check_idle_connections();
+
+                ConnectionPool* pool_;
+                std::chrono::steady_clock::time_point last_timeout_check_;
+                const http::Router* router_;
+                std::unique_ptr<net::Poller> poller_;
+                std::unique_ptr<thread::ThreadPool> thread_pool_;
+                std::unordered_map<int, http::ConnectionPtr> connections_;
+                std::thread event_thread_;
+                std::atomic<bool> running_{false};
+                mutable std::mutex mutex_;
+        };
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/thread/blocking_queue.h
+────────────────────────────────────────────
+#pragma once
+
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+
+namespace eventcore {
+    namespace thread {
+
+        /**
+         * @brief A thread-safe blocking queue implementation
+         * 
+         * This queue blocks on pop operations when empty, making it suitable
+         * for producer-consumer scenarios in thread pools.
+         */
+        template<typename T>
+            class BlockingQueue {
+                public:
+                    /**
+                     * @brief Push a value into the queue
+                     * @param value The value to push
+                     */
+                    void push(T value) {
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            queue_.push(std::move(value));
+                        }
+                        condition_.notify_one();
+                    }
+
+                    /**
+                     * @brief Try to pop a value without blocking
+                     * @param value Reference to store the popped value
+                     * @return true if a value was popped, false if queue was empty
+                     */
+                    bool try_pop(T& value) {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        if (queue_.empty()) {
+                            return false;
+                        }
+                        value = std::move(queue_.front());
+                        queue_.pop();
+                        return true;
+                    }
+
+                    /**
+                     * @brief Pop a value from the queue, blocking if empty
+                     * @return The popped value
+                     */
+                    T pop() {
+                        std::unique_lock<std::mutex> lock(mutex_);
+                        condition_.wait(lock, [this] { 
+                                return !queue_.empty() || stopped_; 
+                                });
+
+                        if (stopped_ && queue_.empty()) {
+                            throw std::runtime_error("Queue is stopped and empty");
+                        }
+
+                        T value = std::move(queue_.front());
+                        queue_.pop();
+                        return value;
+                    }
+
+                    /**
+                     * @brief Try to pop a value with timeout
+                     * @param value Reference to store the popped value
+                     * @param timeout_ms Timeout in milliseconds
+                     * @return true if a value was popped, false if timeout occurred
+                     */
+                    bool try_pop(T& value, int timeout_ms) {
+                        std::unique_lock<std::mutex> lock(mutex_);
+
+                        if (!condition_.wait_for(lock, std::chrono::milliseconds(timeout_ms), 
+                                    [this] { return !queue_.empty() || stopped_; })) {
+                            return false; // Timeout
+                        }
+
+                        if (stopped_ && queue_.empty()) {
+                            return false;
+                        }
+
+                        value = std::move(queue_.front());
+                        queue_.pop();
+                        return true;
+                    }
+
+                    /**
+                     * @brief Check if the queue is empty
+                     * @return true if empty, false otherwise
+                     */
+                    bool empty() const {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        return queue_.empty();
+                    }
+
+                    /**
+                     * @brief Get the number of elements in the queue
+                     * @return Queue size
+                     */
+                    size_t size() const {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        return queue_.size();
+                    }
+
+                    /**
+                     * @brief Stop the queue, waking up all waiting threads
+                     */
+                    void stop() {
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            stopped_ = true;
+                        }
+                        condition_.notify_all();
+                    }
+
+                    /**
+                     * @brief Restart the queue after being stopped
+                     */
+                    void restart() {
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            stopped_ = false;
+                        }
+                    }
+
+                    /**
+                     * @brief Check if the queue is stopped
+                     * @return true if stopped, false otherwise
+                     */
+                    bool is_stopped() const {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        return stopped_;
+                    }
+
+                    /**
+                     * @brief Clear all elements from the queue
+                     */
+                    void clear() {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        while (!queue_.empty()) {
+                            queue_.pop();
+                        }
+                    }
+
+                private:
+                    mutable std::mutex mutex_;
+                    std::condition_variable condition_;
+                    std::queue<T> queue_;
+                    bool stopped_ = false;
+            };
+
+    } // namespace thread
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./include/eventcore/thread/thread_pool.h
+────────────────────────────────────────────
+#pragma once
+#include "blocking_queue.h"
+#include "../core/noncopyable.h"
+#include <vector>
+#include <thread>
+#include <functional>
+#include <atomic>
+
+namespace eventcore {
+    namespace thread {
+
+        class ThreadPool : public NonCopyable {
+            public:
+                using Task = std::function<void()>;
+                explicit ThreadPool(size_t num_threads = std::thread::hardware_concurrency());
+                ~ThreadPool();
+                void start();
+                void stop();
+                void submit(Task task);
+                size_t size() const { return threads_.size(); }
+                size_t pending_tasks() const { return tasks_.size(); }
+
+            private:
+                void worker_thread();
+                std::vector<std::thread> threads_;
+                BlockingQueue<Task> tasks_;
+                std::atomic<bool> running_{false};
+        };
+
+    } // namespace thread
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/core/logger.cpp
+────────────────────────────────────────────
+#include "eventcore/core/logger.h"
+#include <iostream>
+#include <ctime>
+
+namespace eventcore {
+
+    Logger& Logger::instance() {
+        static Logger logger;
+        return logger;
+    }
+
+    Logger::Logger() = default;
+
+    void Logger::set_level(LogLevel level) {
+        level_ = level;
+    }
+
+    void Logger::set_file(const std::string& filename) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!filename.empty()) {
+            file_ = std::make_unique<std::ofstream>(filename, std::ios::app);
+        }
+    }
+
+    void Logger::debug(const std::string& msg) {
+        write(LogLevel::LEVEL_DEBUG, msg);
+    }
+
+    void Logger::info(const std::string& msg) {
+        write(LogLevel::LEVEL_INFO, msg);
+    }
+
+    void Logger::warn(const std::string& msg) {
+        write(LogLevel::LEVEL_WARN, msg);
+    }
+
+    void Logger::error(const std::string& msg) {
+        write(LogLevel::LEVEL_ERROR, msg);
+    }
+
+    void Logger::write(LogLevel level, const std::string& msg) {
+        if (level < level_) return;
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::string log_line = format_time() + " [" + level_string(level) + "] " + msg;
+
+        if (file_ && file_->is_open()) {
+            *file_ << log_line << std::endl;
+        } else {
+            std::cout << log_line << std::endl;
+        }
+    }
+
+    std::string Logger::format_time() {
+        auto now = std::chrono::system_clock::now();
+        auto time_t = std::chrono::system_clock::to_time_t(now);
+
+        char buffer[20];
+        std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
+        return buffer;
+    }
+
+    const char* Logger::level_string(LogLevel level) {
+        switch (level) {
+            case LogLevel::LEVEL_DEBUG: return "DEBUG";
+            case LogLevel::LEVEL_INFO:  return "INFO";
+            case LogLevel::LEVEL_WARN:  return "WARN";
+            case LogLevel::LEVEL_ERROR: return "ERROR";
+            default: return "UNKNOWN";
+        }
+    }
+
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/http/connection.cpp
+────────────────────────────────────────────
+#include "eventcore/http/connection.h"
+#include "eventcore/core/logger.h"
+#include <unistd.h>
+#include <sstream>
+
+namespace eventcore {
+    namespace http {
+
+        Connection::Connection(net::Socket socket, RequestHandler handler)
+            : socket_(std::move(socket)),
+            state_(kConnecting),
+            request_handler_(handler) 
+        {
+            auto result = socket_.set_nonblocking(true);
+            if (result.is_err()) {
+                std::stringstream ss;
+                ss << "Failed to set socket non-blocking: " << result.error();
+                LOG_ERROR(ss.str());
+            }
+        }
+
+        Connection::~Connection() {
+            if (state_ != kDisconnected) {
+                force_close();
+            }
+        }
+
+        void Connection::start() {
+            state_ = kConnected;
+            update_activity();  // Initialize activity timer
+            handle_read();
+        }
+
+        void Connection::send(const Response& response) {
+            if (state_ != kConnected) return;
+            std::string response_str = response.to_string();
+            write_buffer_.append(response_str.data(), response_str.size());
+            handle_write();
+        }
+
+        void Connection::shutdown() {
+            if (state_ == kConnected) {
+                state_ = kDisconnecting;
+                socket_.shutdown_write();
+            }
+        }
+
+        void Connection::force_close() {
+            if (state_ != kDisconnected) {
+                state_ = kDisconnected;
+                socket_.close();
+                if (close_callback_) {
+                    close_callback_(shared_from_this());
+                }
+            }
+        }
+
+        void Connection::handle_read() {
+            if (state_ != kConnected) return;
+
+            // Edge-triggered: read until EAGAIN
+            while (true) {
+                ssize_t n = read_buffer_.read_from_fd(socket_.fd());
+
+                if (n > 0) {
+                    update_activity();
+                    process_request();
+                } else if (n == 0) {
+                    handle_close();
+                    break;
+                } else {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        break;  // No more data available
+                    }
+                    handle_error();
+                    break;
+                }
+            }
+        }
+
+        void Connection::handle_write() {
+            if (state_ != kConnected && state_ != kDisconnecting) return;
+
+            if (write_buffer_.readable_bytes() > 0) {
+                auto result = socket_.send(write_buffer_.peek(), write_buffer_.readable_bytes());
+                if (result.is_ok()) {
+                    write_buffer_.retrieve(result.value());
+                    if (write_buffer_.readable_bytes() == 0 && state_ == kDisconnecting) {
+                        force_close();
+                    }
+                } else {
+                    handle_error();
+                }
+            } else if (state_ == kDisconnecting) {
+                force_close();
+            }
+        }
+
+        void Connection::handle_error() {
+            std::stringstream ss;
+            ss << "Connection error on fd: " << socket_.fd();
+            LOG_ERROR(ss.str());
+            force_close();
+        }
+
+        void Connection::handle_close() {
+            std::stringstream ss;
+            ss << "Connection closed on fd: " << socket_.fd();
+            LOG_DEBUG(ss.str());
+            force_close();
+        }
+
+        void Connection::process_request() {
+            while (true) {
+                Request request;
+                parser_.reset();
+
+                LOG_DEBUG("Attempting to parse request, readable bytes: ",
+                        read_buffer_.readable_bytes());
+
+                if (!parser_.parse_request(&read_buffer_, &request)) {
+                    LOG_DEBUG("Parse failed or incomplete");
+                    break;
+                }
+
+                if (parser_.is_complete()) {
+                    LOG_DEBUG("Request parsed successfully: ",
+                            Request::method_to_string(request.method()), " ",
+                            request.path());
+
+                    request_ = request;
+                    Response response = request_handler_(request);
+
+                    LOG_DEBUG("Sending response with status: ", response.status_code());
+                    send_response(response);
+
+                    std::string connection = request.get_header("Connection");
+                    LOG_DEBUG("Connection header: ", connection);
+
+                    if (connection == "close") {
+                        LOG_DEBUG("Closing connection as requested");
+                        shutdown();
+                        break;
+                    }
+                } else {
+                    LOG_DEBUG("Parser not complete yet");
+                    break;
+                }
+            }
+        }
+
+        void Connection::send_response(const Response& response) {
+            std::string request_connection = request_.get_header("Connection");
+            bool keep_alive =
+                request_connection == "keep-alive" ||
+                (request_.version() == Version::HTTP_1_1 &&
+                 request_connection != "close");
+
+            Response resp = response;
+            resp.set_keep_alive(keep_alive);
+            send(resp);
+        }
+
+        void Connection::reset(int fd) {
+            socket_ = net::Socket(fd);
+
+            auto result = socket_.set_nonblocking(true);
+            if (result.is_err()) {
+                LOG_ERROR("Failed to set non-blocking: ", result.error());
+            }
+
+            state_ = kConnecting;
+            read_buffer_.retrieve_all();
+            write_buffer_.retrieve_all();
+            parser_.reset();
+            request_.reset();
+            last_activity_ = std::chrono::steady_clock::now();
+        }
+
+        void Connection::update_activity() {
+            last_activity_ = std::chrono::steady_clock::now();
+        }
+
+        bool Connection::is_idle(std::chrono::seconds timeout) const {
+            auto now = std::chrono::steady_clock::now();
+            return (now - last_activity_) > timeout;
+        }
+
+    }  // namespace http
+}  // namespace eventcore
+
+
+
+
+────────────────────────────────────────────
+File: ./src/http/parser.cpp
+────────────────────────────────────────────
+#include "eventcore/http/parser.h"
+#include <sstream>
+#include <algorithm>
+
+namespace eventcore {
+    namespace http {
+
+        Parser::Parser() : state_(kExpectRequestLine), request_(nullptr), content_length_(0) {}
+
+        bool Parser::parse_request(net::Buffer* buffer, Request* request) {
+            request_ = request;
+            bool ok = true;
+            bool has_more = true;
+
+            while (has_more && state_ != kComplete) {
+                switch (state_) {
+                    case kExpectRequestLine:
+                        if (const char* crlf = buffer->find_crlf()) {
+                            ok = parse_request_line(buffer->peek(), crlf);
+                            if (ok) {
+                                buffer->retrieve(crlf - buffer->peek() + 2);
+                                state_ = kExpectHeaders;
+                            } else {
+                                has_more = false;
+                            }
+                        } else {
+                            has_more = false;
+                        }
+                        break;
+
+                    case kExpectHeaders:
+                        if (parse_headers(buffer)) {
+                            if (content_length_ > 0) {
+                                state_ = kExpectBody;
+                            } else {
+                                state_ = kComplete;
+                                has_more = false;
+                            }
+                        } else {
+                            has_more = false;
+                        }
+                        break;
+
+                    case kExpectBody:
+                        if (parse_body(buffer)) {
+                            state_ = kComplete;
+                            has_more = false;
+                        } else {
+                            has_more = false;
+                        }
+                        break;
+
+                    case kComplete:
+                        has_more = false;
+                        break;
+                }
+
+                if (!ok) break;
+            }
+
+            return ok && state_ == kComplete;
+        }
+
+        //bool Parser::parse_request(net::Buffer* buffer, Request* request) {
+        //    request_ = request; bool ok = true; bool has_more = true;
+        //    while (has_more) {
+        //        switch (state_) {
+        //            case kExpectRequestLine:
+        //                if (const char* crlf = buffer->find_crlf()) {
+        //                    ok = parse_request_line(buffer->peek(), crlf);
+        //                    if (ok) { buffer->retrieve(crlf - buffer->peek() + 2); state_ = kExpectHeaders; }
+        //                } else has_more = false; break;
+        //            case kExpectHeaders:
+        //                if (parse_headers(buffer)) {
+        //                    if (content_length_ > 0) state_ = kExpectBody;
+        //                    else { state_ = kComplete; has_more = false; }
+        //                } else has_more = false; break;
+        //            case kExpectBody:
+        //                if (parse_body(buffer)) { state_ = kComplete; has_more = false; }
+        //                else has_more = false; break;
+        //            case kComplete: has_more = false; break;
+        //        }
+        //        if (!ok) break;
+        //    }
+        //    return ok;
+        //}
+
+        void Parser::reset() { state_ = kExpectRequestLine; request_ = nullptr; content_length_ = 0; }
+
+        bool Parser::parse_request_line(const char* begin, const char* end) {
+            std::string line(begin, end); std::istringstream iss(line);
+            std::string method, path, version;
+            if (!(iss >> method >> path >> version)) return false;
+            request_->set_method(Request::string_to_method(method));
+            size_t query_pos = path.find('?');
+            if (query_pos != std::string::npos) {
+                request_->set_path(path.substr(0, query_pos));
+                request_->set_query(path.substr(query_pos + 1));
+            } else request_->set_path(path);
+            request_->set_version(Request::string_to_version(version));
+            return request_->method() != Method::UNKNOWN && request_->version() != Version::UNKNOWN;
+        }
+
+        bool Parser::parse_headers(net::Buffer* buffer) {
+            while (const char* crlf = buffer->find_crlf()) {
+                const char* colon = std::find(buffer->peek(), crlf, ':');
+                if (colon != crlf) {
+                    std::string name(buffer->peek(), colon); ++colon;
+                    while (colon < crlf && isspace(*colon)) ++colon;
+                    std::string value(colon, crlf); request_->set_header(name, value);
+                    if (name == "Content-Length") content_length_ = std::stoul(value);
+                } else { buffer->retrieve(crlf - buffer->peek() + 2); return true; }
+                buffer->retrieve(crlf - buffer->peek() + 2);
+            }
+            return false;
+        }
+
+        bool Parser::parse_body(net::Buffer* buffer) {
+            if (buffer->readable_bytes() >= content_length_) {
+                request_->set_body(buffer->retrieve_as_string(content_length_)); return true;
+            }
+            return false;
+        }
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/http/request.cpp
+────────────────────────────────────────────
+#include "eventcore/http/request.h"
+#include <algorithm>
+#include <cctype>
+#include <sstream>
+
+namespace eventcore {
+    namespace http {
+
+        std::string Request::get_header(const std::string& name) const {
+            auto it = headers_.find(name);
+            return it != headers_.end() ? it->second : "";
+        }
+
+        bool Request::has_header(const std::string& name) const {
+            return headers_.find(name) != headers_.end();
+        }
+
+        void Request::set_header(const std::string& name, const std::string& value) {
+            headers_[name] = value;
+        }
+
+        void Request::reset() {
+            method_ = Method::UNKNOWN; path_.clear(); query_.clear();
+            version_ = Version::UNKNOWN; headers_.clear(); body_.clear();
+        }
+
+        Method Request::string_to_method(const std::string& str) {
+            if (str == "GET") return Method::GET;
+            if (str == "POST") return Method::POST;
+            if (str == "PUT") return Method::PUT;
+            if (str == "DELETE") return Method::DELETE;
+            if (str == "HEAD") return Method::HEAD;
+            if (str == "OPTIONS") return Method::OPTIONS;
+            if (str == "PATCH") return Method::PATCH;
+            return Method::UNKNOWN;
+        }
+
+        std::string Request::method_to_string(Method method) {
+            switch (method) {
+                case Method::GET: return "GET";
+                case Method::POST: return "POST";
+                case Method::PUT: return "PUT";
+                case Method::DELETE: return "DELETE";
+                case Method::HEAD: return "HEAD";
+                case Method::OPTIONS: return "OPTIONS";
+                case Method::PATCH: return "PATCH";
+                default: return "UNKNOWN";
+            }
+        }
+
+        Version Request::string_to_version(const std::string& str) {
+            if (str == "HTTP/1.0") return Version::HTTP_1_0;
+            if (str == "HTTP/1.1") return Version::HTTP_1_1;
+            if (str == "HTTP/2.0") return Version::HTTP_2_0;
+            return Version::UNKNOWN;
+        }
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/http/response.cpp
+────────────────────────────────────────────
+#include "eventcore/http/response.h"
+#include <sstream>
+
+namespace eventcore {
+    namespace http {
+
+        Response::Response() : status_code_(200), status_message_("OK"), keep_alive_(true) {}
+
+        void Response::set_status(int code, const std::string& message) {
+            status_code_ = code;
+            status_message_ = message.empty() ? default_status_message(code) : message;
+        }
+
+        void Response::set_header(const std::string& name, const std::string& value) {
+            headers_[name] = value;
+        }
+
+        void Response::set_body(const std::string& body) {
+            body_ = body;
+            set_header("Content-Length", std::to_string(body_.size()));
+        }
+
+        void Response::append_body(const std::string& data) {
+            body_ += data;
+            set_header("Content-Length", std::to_string(body_.size()));
+        }
+
+        void Response::set_content_type(const std::string& type) {
+            set_header("Content-Type", type);
+        }
+
+        void Response::set_keep_alive(bool keep_alive) {
+            keep_alive_ = keep_alive;
+            set_header("Connection", keep_alive ? "keep-alive" : "close");
+        }
+
+        std::string Response::to_string() const {
+            std::stringstream ss;
+            ss << "HTTP/1.1 " << status_code_ << " " << status_message_ << "\r\n";
+            for (const auto& header : headers_) ss << header.first << ": " << header.second << "\r\n";
+            if (headers_.find("Connection") == headers_.end()) {
+                ss << "Connection: " << (keep_alive_ ? "keep-alive" : "close") << "\r\n";
+            }
+            if (headers_.find("Content-Length") == headers_.end() && !body_.empty()) {
+                ss << "Content-Length: " << body_.size() << "\r\n";
+            }
+            ss << "\r\n" << body_;
+            return ss.str();
+        }
+
+        Response Response::make_404() {
+            Response resp; resp.set_status(404, "Not Found"); resp.set_content_type("text/html");
+            resp.set_body("<html><body><h1>404 Not Found</h1></body></html>"); return resp;
+        }
+
+        Response Response::make_500() {
+            Response resp; resp.set_status(500, "Internal Server Error"); resp.set_content_type("text/html");
+            resp.set_body("<html><body><h1>500 Internal Server Error</h1></body></html>"); return resp;
+        }
+
+        Response Response::make_json(int code, const std::string& json) {
+            Response resp; resp.set_status(code); resp.set_content_type("application/json");
+            resp.set_body(json); return resp;
+        }
+
+        Response Response::make_html(int code, const std::string& html) {
+            Response resp; resp.set_status(code); resp.set_content_type("text/html");
+            resp.set_body(html); return resp;
+        }
+
+        std::string Response::default_status_message(int code) const {
+            switch (code) {
+                case 200: return "OK"; case 201: return "Created"; case 204: return "No Content";
+                case 301: return "Moved Permanently"; case 302: return "Found"; case 304: return "Not Modified";
+                case 400: return "Bad Request"; case 401: return "Unauthorized"; case 403: return "Forbidden";
+                case 404: return "Not Found"; case 405: return "Method Not Allowed";
+                case 500: return "Internal Server Error"; case 502: return "Bad Gateway"; case 503: return "Service Unavailable";
+                default: return "Unknown";
+            }
+        }
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/http/router.cpp
+────────────────────────────────────────────
+#include "eventcore/http/router.h"
+#include <algorithm>
+
+namespace eventcore {
+    namespace http {
+        /*
+           Auther-Yubraj Rai
+           
+           Plain string routes:
+           "/health"
+           "/api/users"
+           "/api/time"
+
+           Regex-based dynamic routes:
+           "/users/([0-9]+)"   // Matches /users/123
+           "/posts/(.*)"       // Matches any /posts/xyz
+           "/api/items/[A-Z]+" // Regex with []
+         */
+
+        void Router::add_route(Method method, const std::string& pattern, Handler handler) {
+            Route route;
+            route.pattern = pattern;
+
+            if (pattern.find('(') != std::string::npos ||
+                    pattern.find('[') != std::string::npos ||
+                    pattern.find('*') != std::string::npos) 
+            {
+                route.regex = std::regex(pattern);
+                route.is_regex = true;
+            } else {
+                route.is_regex = false;
+            }
+
+            route.handler = handler;
+            routes_[method].push_back(route);
+        }
+
+        void Router::get(const std::string& pattern, Handler handler) {
+            add_route(Method::GET, pattern, handler);
+        }
+
+        void Router::post(const std::string& pattern, Handler handler) {
+            add_route(Method::POST, pattern, handler);
+        }
+
+        void Router::put(const std::string& pattern, Handler handler) {
+            add_route(Method::PUT, pattern, handler);
+        }
+
+        void Router::del(const std::string& pattern, Handler handler) {
+            add_route(Method::DELETE, pattern, handler);
+        }
+
+        void Router::use(Middleware middleware) {
+            use("", middleware);
+        }
+
+        void Router::use(const std::string& prefix, Middleware middleware) {
+            middlewares_.emplace_back(prefix, middleware);
+        }
+
+        void Router::set_not_found_handler(Handler handler) {
+            not_found_handler_ = handler;
+        }
+
+        void Router::set_error_handler(std::function<Response(const std::exception&)> handler) {
+            error_handler_ = handler;
+        }
+
+        Response Router::route(const Request& request) const {
+            try {
+                Request modified_request = request;
+                Response response;
+
+                // Apply middlewares
+                for (const auto& middleware_pair : middlewares_) {
+                    const std::string& prefix = middleware_pair.first;
+                    const Middleware& middleware = middleware_pair.second;
+
+                    if (prefix.empty() || request.path().find(prefix) == 0) {
+                        middleware(modified_request, response);
+                    }
+                }
+
+                auto method_routes = routes_.find(request.method());
+                if (method_routes != routes_.end()) {
+                    for (const auto& route : method_routes->second) {
+                        if (route.is_regex) {
+                            if (std::regex_match(request.path(), route.regex))
+                                return route.handler(modified_request);
+                        } else {
+                            if (route.pattern == request.path())
+                                return route.handler(modified_request);
+                        }
+                    }
+                }
+
+                if (not_found_handler_)
+                    return not_found_handler_(modified_request);
+
+                return default_404();
+
+            } catch (const std::exception& e) {
+                if (error_handler_)
+                    return error_handler_(e);
+
+                return default_error(e);
+            }
+        }
+
+        Response Router::default_404() const {
+            Response response;
+            response.set_status(404, "Not Found");
+            response.set_content_type("text/html");
+            response.set_body("<html><body><h1>404 Not Found</h1></body></html>");
+            return response;
+        }
+
+        Response Router::default_error(const std::exception& e) const {
+            Response response;
+            response.set_status(500, "Internal Server Error");
+            response.set_content_type("text/html");
+            response.set_body(
+                    "<html><body><h1>500 Internal Server Error</h1><p>" +
+                    std::string(e.what()) + "</p></body></html>"
+                    );
+            return response;
+        }
+
+    } // namespace http
+} // namespace eventcore
+
+
+
+
+────────────────────────────────────────────
+File: ./src/main.cpp
+────────────────────────────────────────────
+#include "eventcore/server/server.h"
+#include "eventcore/core/logger.h"
+#include <csignal>
+#include <iostream>
+#include <ctime>
+#include <sys/resource.h>
+
+std::atomic<bool> running{true};
+
+void signal_handler(int signal) {
+    LOG_INFO("Received signal ", signal, ", shutting down...");
+    running = false;
+}
+
+
+/*
+    Author: Yubraj Rai
+
+    Adjusts the maximum number of file descriptors a process is allowed to use.
+    High-performance servers require a large number of simultaneous connections.
+
+    • Each client connection → 1 socket → 1 file descriptor (FD)
+    • Default Linux FD limits are typically 1024 or 4096, which is too low
+      for servers handling millions of requests.
+    • Raising the limit to millions allows the server to handle a massive
+      number of concurrent connections without hitting OS restrictions.
+*/
+
+void tune_system_limits() {
+    struct rlimit limit;
+
+    // Set file descriptor limit
+    limit.rlim_cur = 1000000;
+    limit.rlim_max = 1000000;
+
+    if (setrlimit(RLIMIT_NOFILE, &limit) == 0) {
+        LOG_INFO("Set RLIMIT_NOFILE to ", limit.rlim_cur);
+    } else {
+        LOG_WARN("Failed to set RLIMIT_NOFILE");
+    }
+
+    // Log current limits
+    getrlimit(RLIMIT_NOFILE, &limit);
+    LOG_INFO("Current FD limit: ", limit.rlim_cur, " (soft) / ", limit.rlim_max, " (hard)");
+}
+
+int main() {
+    tune_system_limits();
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    try {
+        eventcore::server::Config config;
+        config.port = 8080;
+        config.num_workers = 2;
+
+        eventcore::server::Server server(config);
+        server.router().get("/", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp;
+                resp.set_status(200);
+                resp.set_content_type("text/html");
+                resp.set_body(R"(
+                <html>
+                <head><title>EventCore Server</title></head>
+                <body>
+                    <h1>Welcome to EventCore</h1>
+                    <p>High-performance C++ HTTP Server</p>
+                    <ul>
+                        <li><a href="/health">Health Check</a></li>
+                        <li><a href="/api/hello">Hello API</a></li>
+                        <li><a href="/api/time">Current Time</a></li>
+                        <li><a href="/api/echo">Echo Test</a></li>
+                    </ul>
+                </body>
+                </html>
+                )");
+                return resp;
+        });
+
+        server.router().get("/health", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp = eventcore::http::Response::make_json(200, 
+                        R"({"status": "healthy", "server": "EventCore", "timestamp": )" + 
+                        std::to_string(std::time(nullptr)) + "}");
+                return resp;
+                });
+
+        server.router().get("/api/hello", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp = eventcore::http::Response::make_json(200,
+                        R"({"message": "Hello from EventCore!", "timestamp": )" + 
+                        std::to_string(std::time(nullptr)) + "}");
+                return resp;
+                });
+
+        server.router().get("/api/time", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp = eventcore::http::Response::make_json(200,
+                        R"({"timestamp": )" + std::to_string(std::time(nullptr)) + "}");
+                return resp;
+                });
+
+        server.router().post("/api/echo", [](const eventcore::http::Request& req) {
+                eventcore::http::Response resp = eventcore::http::Response::make_json(200,
+                        R"({"echo": ")" + req.body() + "\"}");
+                return resp;
+                });
+
+        server.router().set_not_found_handler([](const eventcore::http::Request& req) {
+                eventcore::http::Response resp;
+                resp.set_status(404);
+                resp.set_content_type("application/json");
+                resp.set_body(R"({"error": "Not Found", "path": ")" + req.path() + "\"}");
+                return resp;
+                });
+
+        LOG_INFO("Starting EventCore server...");
+        server.start();
+
+        while (running) std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        LOG_INFO("Shutting down server...");
+        server.stop();
+
+    } catch (const std::exception& e) {
+        LOG_ERROR("Server error: ", e.what());
+        return 1;
+    }
+
+    LOG_INFO("Server stopped successfully");
+    return 0;
+}
+
+
+
+────────────────────────────────────────────
+File: ./src/net/address.cpp
+────────────────────────────────────────────
+#include "eventcore/net/address.h"
+#include <arpa/inet.h>
+#include <cstring>
+#include <sstream>
+
+namespace eventcore {
+    namespace net {
+
+        Address::Address(const std::string& ip, uint16_t port) {
+            std::memset(&addr_, 0, sizeof(addr_));
+            addr_.sin_family = AF_INET;
+            addr_.sin_port = htons(port);
+            inet_pton(AF_INET, ip.c_str(), &addr_.sin_addr);
+        }
+
+        Address::Address(const struct sockaddr_in& addr) : addr_(addr) {}
+
+        std::string Address::ip() const {
+            char buf[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &addr_.sin_addr, buf, sizeof(buf));
+            return buf;
+        }
+
+        uint16_t Address::port() const {
+            return ntohs(addr_.sin_port);
+        }
+
+        std::string Address::to_string() const {
+            std::stringstream ss;
+            ss << ip() << ":" << port();
+            return ss.str();
+        }
+
+        const struct sockaddr* Address::sockaddr() const {
+            return reinterpret_cast<const struct sockaddr*>(&addr_);
+        }
+
+        socklen_t Address::socklen() const {
+            return sizeof(addr_);
+        }
+
+        Address Address::from_sockaddr(const struct sockaddr_in& addr) {
+            return Address(addr);
+        }
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/net/buffer.cpp
+────────────────────────────────────────────
+#include "eventcore/net/buffer.h"
+#include <sys/uio.h>
+#include <unistd.h>
+#include <errno.h>
+
+namespace eventcore {
+    namespace net {
+
+        const char Buffer::kCRLF[] = "\r\n";
+
+        Buffer::Buffer(size_t initial_size)
+            : buffer_(kPrependSize + initial_size),
+            read_index_(kPrependSize),
+            write_index_(kPrependSize) {}
+
+        void Buffer::retrieve(size_t len) {
+            if (len < readable_bytes()) read_index_ += len;
+            else retrieve_all();
+        }
+
+        void Buffer::retrieve_all() {
+            read_index_ = kPrependSize;
+            write_index_ = kPrependSize;
+        }
+
+        std::string Buffer::retrieve_as_string(size_t len) {
+            std::string result(peek(), len);
+            retrieve(len);
+            return result;
+        }
+
+        std::string Buffer::retrieve_all_as_string() {
+            return retrieve_as_string(readable_bytes());
+        }
+
+        void Buffer::append(const char* data, size_t len) {
+            ensure_writable(len);
+            std::copy(data, data + len, begin_write());
+            has_written(len);
+        }
+
+        void Buffer::append(const std::string& str) {
+            append(str.data(), str.size());
+        }
+
+        void Buffer::append(const void* data, size_t len) {
+            append(static_cast<const char*>(data), len);
+        }
+
+        void Buffer::ensure_writable(size_t len) {
+            if (writable_bytes() < len) make_space(len);
+        }
+
+        void Buffer::make_space(size_t len) {
+            if (writable_bytes() + prependable_bytes() < len + kPrependSize) {
+                buffer_.resize(write_index_ + len);
+            } else {
+                size_t readable = readable_bytes();
+                std::copy(begin() + read_index_, begin() + write_index_, begin() + kPrependSize);
+                read_index_ = kPrependSize;
+                write_index_ = read_index_ + readable;
+            }
+        }
+
+        ssize_t Buffer::read_from_fd(int fd) {
+            char extrabuf[65536];
+            struct iovec vec[2];
+            const size_t writable = writable_bytes();
+
+            vec[0].iov_base = begin_write();
+            vec[0].iov_len = writable;
+            vec[1].iov_base = extrabuf;
+            vec[1].iov_len = sizeof(extrabuf);
+
+            const int iovcnt = (writable < sizeof(extrabuf)) ? 2 : 1;
+            const ssize_t n = ::readv(fd, vec, iovcnt);
+
+            if (n < 0) return n;
+            else if (static_cast<size_t>(n) <= writable) write_index_ += n;
+            else {
+                write_index_ = buffer_.size();
+                append(extrabuf, n - writable);
+            }
+            return n;
+        }
+
+        const char* Buffer::find_crlf() const {
+            const char* crlf = std::search(peek(), begin_write(), kCRLF, kCRLF + 2);
+            return crlf == begin_write() ? nullptr : crlf;
+        }
+
+        const char* Buffer::find_crlf(const char* start) const {
+            const char* crlf = std::search(start, begin_write(), kCRLF, kCRLF + 2);
+            return crlf == begin_write() ? nullptr : crlf;
+        }
+
+        const char* Buffer::find_eol() const {
+            const void* eol = memchr(peek(), '\n', readable_bytes());
+            return static_cast<const char*>(eol);
+        }
+
+        const char* Buffer::find_eol(const char* start) const {
+            const void* eol = memchr(start, '\n', begin_write() - start);
+            return static_cast<const char*>(eol);
+        }
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/net/poller.cpp
+────────────────────────────────────────────
+#include "eventcore/net/poller.h"
+#ifdef __linux__
+#include <sys/epoll.h>
+#else
+#include <sys/select.h>
+#endif
+#include <unistd.h>
+#include <cerrno>
+#include <stdexcept>
+
+namespace eventcore {
+    namespace net {
+
+        std::unique_ptr<Poller> Poller::create() {
+#ifdef __linux__
+            return std::make_unique<EpollPoller>();
+#else
+            return std::make_unique<SelectPoller>();
+#endif
+        }
+
+#ifdef __linux__
+
+        EpollPoller::EpollPoller() : epfd_(epoll_create1(EPOLL_CLOEXEC)), events_(16) {
+            if (epfd_ < 0) throw std::runtime_error("epoll_create1 failed");
+        }
+
+        EpollPoller::~EpollPoller() { 
+            if (epfd_ >= 0) {
+                ::close(epfd_);
+            }
+        }
+
+        bool EpollPoller::add(int fd, int events, EventCallback cb) {
+            struct epoll_event ev;
+            ev.data.fd = fd;
+            ev.events = 0;
+
+            if (events & kReadable) ev.events |= EPOLLIN;
+            if (events & kWritable) ev.events |= EPOLLOUT;
+            ev.events |= EPOLLET | EPOLLONESHOT;
+
+            if (epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &ev) < 0) {
+                return false;
+            }
+
+            callbacks_[fd] = cb;
+            return true;
+        }
+
+        bool EpollPoller::modify(int fd, int events) {
+            struct epoll_event ev;
+            ev.data.fd = fd;
+            ev.events = 0;
+
+            if (events & kReadable) ev.events |= EPOLLIN;
+            if (events & kWritable) ev.events |= EPOLLOUT;
+            ev.events |= EPOLLET;
+
+            return epoll_ctl(epfd_, EPOLL_CTL_MOD, fd, &ev) == 0;
+        }
+
+        bool EpollPoller::remove(int fd) {
+            if (epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr) < 0) {
+                return false;
+            }
+            callbacks_.erase(fd);
+            return true;
+        }
+
+        int EpollPoller::poll(int timeout_ms) {
+            int numEvents = epoll_wait(epfd_, events_.data(), static_cast<int>(events_.size()), timeout_ms);
+
+            if (numEvents > 0) {
+                if (static_cast<size_t>(numEvents) == events_.size()) {
+                    events_.resize(events_.size() * 2);
+                }
+
+                for (int i = 0; i < numEvents; ++i) {
+                    int fd = events_[i].data.fd;
+                    int revents = 0;
+
+                    if (events_[i].events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)) {
+                        revents |= kReadable;
+                    }
+                    if (events_[i].events & EPOLLOUT) {
+                        revents |= kWritable;
+                    }
+                    if (events_[i].events & (EPOLLERR | EPOLLHUP)) {
+                        revents |= kError;
+                    }
+
+                    auto it = callbacks_.find(fd);
+                    if (it != callbacks_.end()) {
+                        it->second(fd, revents);
+                    }
+                }
+            }
+
+            return numEvents;
+        }
+
+#endif // __linux__
+
+        SelectPoller::SelectPoller() : max_fd_(-1) {}
+
+        SelectPoller::~SelectPoller() = default;
+
+        bool SelectPoller::add(int fd, int events, EventCallback cb) {
+            FdInfo info;
+            info.events = events;
+            info.callback = cb;
+            fds_[fd] = info;
+
+            if (fd > max_fd_) {
+                max_fd_ = fd;
+            }
+
+            return true;
+        }
+
+        bool SelectPoller::modify(int fd, int events) {
+            auto it = fds_.find(fd);
+            if (it != fds_.end()) {
+                it->second.events = events;
+                return true;
+            }
+            return false;
+        }
+
+        bool SelectPoller::remove(int fd) {
+            fds_.erase(fd);
+
+            if (fd == max_fd_) {
+                max_fd_ = -1;
+                for (const auto& pair : fds_) {
+                    if (pair.first > max_fd_) {
+                        max_fd_ = pair.first;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        int SelectPoller::poll(int timeout_ms) {
+            fd_set readfds, writefds, exceptfds;
+            FD_ZERO(&readfds);
+            FD_ZERO(&writefds);
+            FD_ZERO(&exceptfds);
+
+            for (const auto& pair : fds_) {
+                int fd = pair.first;
+                int events = pair.second.events;
+
+                if (events & kReadable) FD_SET(fd, &readfds);
+                if (events & kWritable) FD_SET(fd, &writefds);
+                FD_SET(fd, &exceptfds);
+            }
+
+            struct timeval tv;
+            tv.tv_sec = timeout_ms / 1000;
+            tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+            int ret = ::select(max_fd_ + 1, &readfds, &writefds, &exceptfds, &tv);
+
+            if (ret > 0) {
+                for (const auto& pair : fds_) {
+                    int fd = pair.first;
+                    int revents = 0;
+
+                    if (FD_ISSET(fd, &readfds)) revents |= kReadable;
+                    if (FD_ISSET(fd, &writefds)) revents |= kWritable;
+                    if (FD_ISSET(fd, &exceptfds)) revents |= kError;
+
+                    if (revents) {
+                        pair.second.callback(fd, revents);
+                    }
+                }
+            }
+
+            return ret;
+        }
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/net/socket.cpp
+────────────────────────────────────────────
+#include "eventcore/net/socket.h"
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/tcp.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
+
+namespace eventcore {
+    namespace net {
+
+        Socket::Socket() : fd_(-1) {}
+        Socket::Socket(int fd) : fd_(fd) {}
+
+        Socket::~Socket() {
+            if (fd_ >= 0) ::close(fd_);
+        }
+
+        Socket::Socket(Socket&& other) noexcept : fd_(other.fd_) {
+            other.fd_ = -1;
+        }
+
+        Socket& Socket::operator=(Socket&& other) noexcept {
+            if (this != &other) {
+                close();
+                fd_ = other.fd_;
+                other.fd_ = -1;
+            }
+            return *this;
+        }
+        Result<void> Socket::bind(const Address& addr) {
+            if (::bind(fd_, addr.sockaddr(), addr.socklen()) < 0) {
+                return Result<void>::Err(std::string("bind failed: ") + strerror(errno));
+            }
+            return Result<void>::Ok();
+        }
+
+        Result<void> Socket::listen(int backlog) {
+            if (::listen(fd_, backlog) < 0) {
+                return Result<void>::Err(std::string("listen failed: ") + strerror(errno));
+            }
+            return Result<void>::Ok();
+        }
+
+        Result<void> Socket::connect(const Address& addr) {
+            if (::connect(fd_, addr.sockaddr(), addr.socklen()) < 0) {
+                return Result<void>::Err(std::string("connect failed: ") + strerror(errno));
+            }
+            return Result<void>::Ok();
+        }
+
+        Result<Socket> Socket::accept() {
+            struct sockaddr_in addr;
+            socklen_t len = sizeof(addr);
+            int client_fd = ::accept(fd_, reinterpret_cast<struct sockaddr*>(&addr), &len);
+            if (client_fd < 0) {
+                return Result<Socket>::Err(std::string("accept failed: ") + strerror(errno));
+            }
+            return Result<Socket>::Ok(Socket(client_fd));
+        }
+
+
+        Result<size_t> Socket::send(const void* data, size_t len) {
+            ssize_t n = ::send(fd_, data, len, MSG_NOSIGNAL);
+            if (n < 0) return Result<size_t>::Err(std::string("send failed: ") + strerror(errno));
+            return Result<size_t>::Ok(static_cast<size_t>(n));
+        }
+
+        Result<size_t> Socket::recv(void* data, size_t len) {
+            ssize_t n = ::recv(fd_, data, len, 0);
+            if (n < 0) return Result<size_t>::Err(std::string("recv failed: ") + strerror(errno));
+            return Result<size_t>::Ok(static_cast<size_t>(n));
+        }
+
+
+        Result<void> Socket::set_nonblocking(bool enable) {
+            int flags = fcntl(fd_, F_GETFL, 0);
+            if (flags < 0) {
+                return Result<void>::Err("fcntl F_GETFL failed");
+            }
+
+            if (enable) {
+                flags |= O_NONBLOCK;
+            } else {
+                flags &= ~O_NONBLOCK;
+            }
+
+            if (fcntl(fd_, F_SETFL, flags) < 0) {
+                return Result<void>::Err("fcntl F_SETFL failed");
+            }
+            return Result<void>::Ok();
+        }
+
+        Result<void> Socket::set_reuseaddr(bool enable) {
+            int optval = enable ? 1 : 0;
+            if (setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+                return Result<void>::Err("setsockopt SO_REUSEADDR failed");
+            }
+            return Result<void>::Ok();
+        }
+
+        Result<void> Socket::set_reuseport(bool enable) {
+#ifdef SO_REUSEPORT
+            int optval = enable ? 1 : 0;
+            if (setsockopt(fd_, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval)) < 0) {
+                return Result<void>::Err("setsockopt SO_REUSEPORT failed");
+            }
+#endif
+            return Result<void>::Ok();
+        }
+
+        Result<void> Socket::set_nodelay(bool enable) {
+            int optval = enable ? 1 : 0;
+            if (setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval)) < 0) {
+                return Result<void>::Err("setsockopt TCP_NODELAY failed");
+            }
+            return Result<void>::Ok();
+        }
+
+        Result<void> Socket::set_keepalive(bool enable) {
+            int optval = enable ? 1 : 0;
+            if (setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(optval)) < 0) {
+                return Result<void>::Err("setsockopt SO_KEEPALIVE failed");
+            }
+            return Result<void>::Ok();
+        }
+        void Socket::shutdown_write() {
+            ::shutdown(fd_, SHUT_WR);
+        }
+
+        void Socket::close() {
+            if (fd_ >= 0) {
+                ::close(fd_);
+                fd_ = -1;
+            }
+        }
+
+        Result<Socket> Socket::create_tcp() {
+            int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+            if (fd < 0) return Result<Socket>::Err(std::string("socket creation failed: ") + strerror(errno));
+            return Result<Socket>::Ok(Socket(fd));
+        }
+
+        Result<Socket> Socket::create_udp() {
+            int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+            if (fd < 0) return Result<Socket>::Err(std::string("socket creation failed: ") + strerror(errno));
+            return Result<Socket>::Ok(Socket(fd));
+        }
+
+    } // namespace net
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/server/connection_pool.cpp
+────────────────────────────────────────────
+#include "eventcore/server/connection_pool.h"
+
+namespace eventcore {
+    namespace server {
+
+        ConnectionPool::ConnectionPool(size_t size) {
+            pool_.resize(size);
+            free_indices_.reserve(size);
+
+            for (size_t i = 0; i < size; ++i) {
+                pool_[i].in_use = false;
+                free_indices_.push_back(i);
+            }
+        }
+
+        http::ConnectionPtr ConnectionPool::acquire(
+                int fd, http::Connection::RequestHandler handler) {
+
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            if (free_indices_.empty()) {
+                return nullptr;
+            }
+
+            size_t idx = free_indices_.back();
+            free_indices_.pop_back();
+
+            auto& entry = pool_[idx];
+
+            if (!entry.conn) {
+                entry.conn = std::make_shared<http::Connection>(
+                        net::Socket(fd), handler);
+            } else {
+                entry.conn->reset(fd);
+            }
+
+            entry.in_use = true;
+            entry.last_used = std::chrono::steady_clock::now();
+            fd_to_index_[fd] = idx;
+
+            return entry.conn;
+        }
+
+        void ConnectionPool::release(int fd) {
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            auto it = fd_to_index_.find(fd);
+            if (it == fd_to_index_.end()) return;
+
+            size_t idx = it->second;
+            pool_[idx].in_use = false;
+            free_indices_.push_back(idx);
+            fd_to_index_.erase(it);
+        }
+
+        size_t ConnectionPool::available() const {
+            std::lock_guard<std::mutex> lock(mutex_);
+            return free_indices_.size();
+        }
+
+        std::vector<int> ConnectionPool::get_idle_connections(
+                std::chrono::seconds timeout) {
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            std::vector<int> idle_fds;
+            auto now = std::chrono::steady_clock::now();
+
+            for (const auto& pair : fd_to_index_) {
+                int fd = pair.first;
+                size_t idx = pair.second;
+
+                const auto& entry = pool_[idx];
+                if (entry.in_use && 
+                        (now - entry.last_used) > timeout) {
+                    idle_fds.push_back(fd);
+                }
+            }
+
+            return idle_fds;
+        }
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./src/server/server.cpp
+────────────────────────────────────────────
+#include "eventcore/server/server.h"
+#include "eventcore/core/logger.h"
+#include <algorithm>
+#include <sstream>
+
+namespace eventcore {
+    namespace server {
+
+        Server::Server(const Config& config)
+            : config_(config),
+            pool_(config_.connection_pool_size) {  // Initialize pool
+
+                if (config_.num_workers == 0) {
+                    config_.num_workers = std::thread::hardware_concurrency();
+                    if (config_.num_workers == 0) config_.num_workers = 1;
+                }
+
+                for (size_t i = 0; i < config_.num_workers; ++i) {
+                    workers_.push_back(std::make_unique<Worker>(
+                                &router_,
+                                config_.num_threads_per_worker,
+                                &pool_));  // Pass pool pointer
+                }
+
+                LOG_INFO("Server configured with ", config_.num_workers, " workers, ",
+                        config_.num_threads_per_worker, " threads each, ",
+                        config_.connection_pool_size, " connection pool");
+            }
+
+        Server::~Server() {
+            stop();
+        }
+
+        void Server::start() {
+            if (running_) return;
+
+            auto result = net::Socket::create_tcp();
+            if (result.is_err())
+                throw std::runtime_error("Failed to create socket: " + result.error());
+            listen_socket_ = std::move(result.value());
+
+            // Set socket options
+            auto reuseaddr_result = listen_socket_.set_reuseaddr(true);
+            if (reuseaddr_result.is_err())
+                throw std::runtime_error("Set reuseaddr failed: " + reuseaddr_result.error());
+
+            auto reuseport_result = listen_socket_.set_reuseport(config_.tcp_reuseport);
+            if (reuseport_result.is_err())
+                throw std::runtime_error("Set reuseport failed: " + reuseport_result.error());
+
+            auto nodelay_result = listen_socket_.set_nodelay(config_.tcp_nodelay);
+            if (nodelay_result.is_err())
+                throw std::runtime_error("Set nodelay failed: " + nodelay_result.error());
+
+            auto keepalive_result = listen_socket_.set_keepalive(true);
+            if (keepalive_result.is_err())
+                throw std::runtime_error("Set keepalive failed: " + keepalive_result.error());
+
+            // Bind and listen
+            net::Address addr(config_.host, config_.port);
+            auto bind_result = listen_socket_.bind(addr);
+            if (bind_result.is_err())
+                throw std::runtime_error("Bind failed: " + bind_result.error());
+
+            auto listen_result = listen_socket_.listen(config_.backlog);
+            if (listen_result.is_err())
+                throw std::runtime_error("Listen failed: " + listen_result.error());
+
+            auto nonblock_result = listen_socket_.set_nonblocking(true);
+            if (nonblock_result.is_err())
+                throw std::runtime_error("Set non-blocking failed: " + nonblock_result.error());
+
+            // Start workers
+            for (auto& worker : workers_) {
+                worker->start();
+            }
+
+            running_ = true;
+            accept_thread_ = std::thread(&Server::accept_loop, this);
+
+            std::stringstream ss;
+            ss << "Server started on " << config_.host << ":" << config_.port;
+            LOG_INFO(ss.str());
+        }
+
+        void Server::stop() {
+            if (!running_) return;
+            running_ = false;
+
+            if (accept_thread_.joinable()) accept_thread_.join();
+            for (auto& worker : workers_) {
+                worker->stop();
+            }
+
+            listen_socket_.close();
+            LOG_INFO("Server stopped");
+        }
+
+        void Server::wait() {
+            if (accept_thread_.joinable()) {
+                accept_thread_.join();
+            }
+        }
+
+        void Server::accept_loop() {
+            while (running_) {
+                int accepted = 0;
+
+                for (int i = 0; i < config_.accept_batch_size && running_; ++i) {
+                    auto result = listen_socket_.accept();
+
+                    if (result.is_ok()) {
+                        net::Socket client_socket = std::move(result.value());
+                        handle_new_connection(std::move(client_socket));
+                        accepted++;
+                    } else {
+                        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                            LOG_ERROR("Accept error: ", result.error());
+                        }
+                        break;  // No more pending connections
+                    }
+                }
+
+                if (accepted == 0) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                }
+            }
+        }
+
+        void Server::handle_new_connection(net::Socket client_socket) {
+            int fd = client_socket.fd();
+
+            auto request_handler = [this](const http::Request& req) {
+                return router_.route(req);
+            };
+
+            auto conn = pool_.acquire(fd, request_handler);
+
+            if (!conn) {
+                LOG_WARN("Connection pool exhausted, rejecting connection");
+                client_socket.close();
+                return;
+            }
+
+            client_socket.release();
+
+            Worker* worker = next_worker();
+            if (worker) {
+                worker->add_connection(conn);
+            } else {
+                LOG_ERROR("No available workers");
+                pool_.release(fd);
+            }
+        }
+
+        Worker* Server::next_worker() {
+            size_t idx = next_worker_idx_++ % workers_.size();
+            return workers_[idx].get();
+        }
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+
+────────────────────────────────────────────
+File: ./src/server/worker.cpp
+────────────────────────────────────────────
+#include "eventcore/server/worker.h"
+#include "eventcore/core/logger.h"
+#include <unistd.h>
+#include <cstring>
+#include <sstream>
+
+namespace eventcore {
+    namespace server {
+
+        Worker::Worker(const http::Router* router,
+                size_t thread_pool_size,
+                ConnectionPool* pool)
+            : router_(router),
+            pool_(pool),
+            thread_pool_(std::make_unique<thread::ThreadPool>(thread_pool_size)),
+            last_timeout_check_(std::chrono::steady_clock::now()) 
+        {
+            poller_ = net::Poller::create();
+            if (!poller_) {
+                throw std::runtime_error("Failed to create poller");
+            }
+        }
+
+        Worker::~Worker() { stop(); }
+
+        void Worker::start() {
+            if (running_) return;
+            running_ = true;
+            thread_pool_->start();
+            event_thread_ = std::thread(&Worker::event_loop, this);
+            LOG_INFO("Worker started");
+        }
+
+        void Worker::stop() {
+            if (!running_) return;
+            running_ = false;
+
+            if (event_thread_.joinable()) {
+                event_thread_.join();
+            }
+
+            thread_pool_->stop();
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                connections_.clear();
+            }
+
+            LOG_INFO("Worker stopped");
+        }
+
+        void Worker::add_connection(http::ConnectionPtr conn) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            int fd = conn->fd();
+            connections_[fd] = conn;
+
+            conn->set_close_callback([this](http::ConnectionPtr conn) {
+                    remove_connection(conn->fd());
+                    pool_->release(conn->fd());
+                    });
+
+            if (!poller_->add(
+                        fd,
+                        net::Poller::kReadable,
+                        [this](int fd, int events) {
+                        handle_connection_event(fd, events);
+                        })) 
+            {
+                LOG_ERROR("Failed to add connection to poller");
+                connections_.erase(fd);
+                pool_->release(fd);
+                return;
+            }
+
+            conn->start();
+        }
+
+        void Worker::check_idle_connections() {
+            auto now = std::chrono::steady_clock::now();
+
+            // Check every 5 seconds
+            if (now - last_timeout_check_ < std::chrono::seconds(5)) {
+                return;
+            }
+
+            last_timeout_check_ = now;
+
+            auto idle_fds = pool_->get_idle_connections(std::chrono::seconds(60));
+
+            for (int fd : idle_fds) {
+                std::lock_guard<std::mutex> lock(mutex_);
+                auto it = connections_.find(fd);
+                if (it != connections_.end()) {
+                    LOG_DEBUG("Closing idle connection: ", fd);
+                    poller_->remove(fd);
+                    close(fd);
+                    connections_.erase(it);
+                    pool_->release(fd);
+                }
+            }
+        }
+
+        void Worker::event_loop() {
+            while (running_) {
+                try {
+                    int num_events = poller_->poll(100);
+
+                    if (num_events < 0 && errno != EINTR) {
+                        LOG_ERROR("Poller error");
+                        break;
+                    }
+
+                    // Check for idle connections periodically
+                    check_idle_connections();
+
+                } catch (const std::exception& e) {
+                    LOG_ERROR("Exception in worker event loop: ", e.what());
+                }
+            }
+        }
+
+        void Worker::handle_connection_event(int fd, int events) {
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            auto it = connections_.find(fd);
+            if (it == connections_.end()) return;
+
+            auto conn = it->second;
+
+            try {
+                if (events & net::Poller::kError) {
+                    remove_connection(fd);
+                    pool_->release(fd);
+                    return;
+                }
+
+                if (events & net::Poller::kReadable) {
+                    // Process in thread pool
+                    thread_pool_->submit([conn, this, fd]() {
+                            conn->handle_read();
+                            conn->update_activity();
+                            });
+                }
+
+                if (events & net::Poller::kWritable) {
+                    thread_pool_->submit([conn]() {
+                            conn->handle_write();
+                            });
+                }
+
+            } catch (const std::exception& e) {
+                LOG_ERROR("Error handling connection event: ", e.what());
+                remove_connection(fd);
+                pool_->release(fd);
+            }
+        }
+
+        void Worker::remove_connection(int fd) {
+            poller_->remove(fd);
+            connections_.erase(fd);
+        }
+
+    } // namespace server
+} // namespace eventcore
+
+
+
+
+────────────────────────────────────────────
+File: ./src/thread/thread_pool.cpp
+────────────────────────────────────────────
+#include "eventcore/thread/thread_pool.h"
+#include "eventcore/core/logger.h"
+#include <algorithm>
+#include <sstream>
+
+namespace eventcore {
+    namespace thread {
+
+        ThreadPool::ThreadPool(size_t num_threads) { 
+            threads_.reserve(num_threads); 
+        }
+
+        ThreadPool::~ThreadPool() { 
+            stop(); 
+        }
+
+        void ThreadPool::start() {
+            if (running_) return;
+            running_ = true;
+            for (size_t i = 0; i < threads_.capacity(); ++i) {
+                threads_.emplace_back(&ThreadPool::worker_thread, this);
+            }
+
+            std::stringstream ss;
+            ss << "ThreadPool started with " << threads_.size() << " threads";
+            LOG_INFO(ss.str());
+        }
+
+        void ThreadPool::stop() {
+            if (!running_) return;
+            running_ = false;
+
+            // Wake up all threads
+            for (size_t i = 0; i < threads_.size(); ++i) {
+                submit([]{}); 
+            }
+
+            // Join all threads
+            for (auto& thread : threads_) {
+                if (thread.joinable()) thread.join();
+            }
+            threads_.clear(); 
+
+            LOG_INFO("ThreadPool stopped");
+        }
+
+        void ThreadPool::submit(Task task) { 
+            tasks_.push(std::move(task)); 
+        }
+
+        void ThreadPool::worker_thread() {
+            while (running_) {
+                try {
+                    Task task = tasks_.pop();
+                    if (task) task();
+                } catch (const std::exception& e) {
+                    std::stringstream ss;
+                    ss << "Exception in worker thread: " << e.what();
+                    LOG_ERROR(ss.str());
+                }
+            }
+        }
+
+    } // namespace thread
+} // namespace eventcore
+
+
+
+────────────────────────────────────────────
+File: ./tests/CMakeLists.txt
+────────────────────────────────────────────
+# Tests
+if(BUILD_TESTS)
+    find_package(GTest REQUIRED)
+    
+    # Test executables
+    add_executable(test_http test_http.cpp)
+    target_link_libraries(test_http PRIVATE eventcore_static GTest::gtest GTest::gtest_main)
+    set_target_properties(test_http PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
+    )
+    
+    add_executable(test_net test_net.cpp)
+    target_link_libraries(test_net PRIVATE eventcore_static GTest::gtest GTest::gtest_main)
+    set_target_properties(test_net PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
+    )
+    
+    add_executable(test_thread test_thread.cpp)
+    target_link_libraries(test_thread PRIVATE eventcore_static GTest::gtest GTest::gtest_main)
+    set_target_properties(test_thread PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
+    )
+    
+    add_executable(test_server test_server.cpp)
+    target_link_libraries(test_server PRIVATE eventcore_static GTest::gtest GTest::gtest_main)
+    set_target_properties(test_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests
+    )
+    
+    # Add tests
+    add_test(NAME test_http COMMAND test_http)
+    add_test(NAME test_net COMMAND test_net)
+    add_test(NAME test_thread COMMAND test_thread)
+    add_test(NAME test_server COMMAND test_server)
+    
+    # Install tests (optional)
+    if(INSTALL_TESTS)
+        install(TARGETS test_http test_net test_thread test_server
+            RUNTIME DESTINATION bin/tests
+        )
+    endif()
+endif()
+
+
+
+────────────────────────────────────────────
+File: ./tests/.CMakeLists.txt.swp
+────────────────────────────────────────────
+b0VIM 8.2\00\00\00\00\00\00}\DBhql&\00X~\00yubraj\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00T490\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00~yubraj/EventCore/tests/CMakeLists.txt\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00
+\003210\00\00\00\00#"! U\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00tp\00\00\00\00\00\00\00\00\00\00\00*\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00ad\00\00<	\00\00\00
+\00\00\00\00\00*\00\00\00\00\00\00\00\F8\00\00\E8\00\00\C7\00\00\C2\00\00\AB\00\00\00\00"\00\00\F3\00\00\B4\00\00\AE\00\00\A9\00\00\00\00#\00\00\F5
+\00\00\B6
+\00\00\B0
+\00\00\AB
+\00\00{
+\00\00
+\00\00\EB\00\00\AC\00\00\A6\00\00\A1\00\00q\00\00\00\00\E1\00\00\A2\00\00\9C\00\00\97\00\00\87\00\00X\00\00+\00\00\F8
+\00\00\C5
+\00\00\C0
+\00\00\A1
+\00\00\8B
+\00\00H
+\00\00
+\00\00
+\00\00
+\00\00\00
+\00\00\FF	\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00endif()\00    endif()\00        )\00            RUNTIME DESTINATION bin/tests\00        install(TARGETS test_http test_net test_thread test_server\00    if(INSTALL_TESTS)\00    # Install tests (optional)\00    \00    add_test(NAME test_server COMMAND test_server)\00    add_test(NAME test_thread COMMAND test_thread)\00    add_test(NAME test_net COMMAND test_net)\00    add_test(NAME test_http COMMAND test_http)\00    # Add tests\00    \00    )\00        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests\00    set_target_properties(test_server PROPERTIES\00    target_link_libraries(test_server PRIVATE eventcore_static GTest::gtest GTest::gtest_main)\00    add_executable(test_server test_server.cpp)\00    \00    )\00        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests\00    set_target_properties(test_thread PROPERTIES\00    target_link_libraries(test_thread PRIVATE eventcore_static GTest::gtest GTest::gtest_main)\00    add_executable(test_thread test_thread.cpp)\00    \00    )\00        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests\00    set_target_properties(test_net PROPERTIES\00    target_link_libraries(test_net PRIVATE eventcore_static GTest::gtest GTest::gtest_main)\00    add_executable(test_net test_net.cpp)\00    \00    )\00        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests\00    set_target_properties(test_http PROPERTIES\00    target_link_libraries(test_http PRIVATE eventcore_static GTest::gtest GTest::gtest_main)\00    add_executable(test_http test_http.cpp)\00    # Test executables\00    \00    find_package(GTest REQUIRED)\00if(BUILD_TESTS)\00# Tests\00
+
+
+────────────────────────────────────────────
+File: ./tests/test_http.cpp
+────────────────────────────────────────────
+#include <gtest/gtest.h>
+#include "eventcore/http/request.h"
+#include "eventcore/http/response.h"
+#include "eventcore/http/router.h"
+
+using namespace eventcore::http;
+
+TEST(HttpRequestTest, MethodConversion) {
+    EXPECT_EQ(Request::string_to_method("GET"), Method::GET);
+    EXPECT_EQ(Request::string_to_method("POST"), Method::POST);
+    EXPECT_EQ(Request::string_to_method("UNKNOWN"), Method::UNKNOWN);
+    EXPECT_EQ(Request::method_to_string(Method::GET), "GET");
+    EXPECT_EQ(Request::method_to_string(Method::POST), "POST");
+}
+
+TEST(HttpResponseTest, BasicCreation) {
+    Response resp;
+    resp.set_status(200, "OK");
+    resp.set_body("Hello World");
+    EXPECT_EQ(resp.status_code(), 200);
+    EXPECT_EQ(resp.status_message(), "OK");
+    EXPECT_EQ(resp.body(), "Hello World");
+}
+
+TEST(HttpRouterTest, BasicRouting) {
+    Router router;
+    bool handler_called = false;
+    router.get("/test", [&](const Request& req) {
+            handler_called = true;
+            Response resp; resp.set_status(200); return resp;
+            });
+    Request req; req.set_method(Method::GET); req.set_path("/test");
+    Response resp = router.route(req);
+    EXPECT_TRUE(handler_called);
+    EXPECT_EQ(resp.status_code(), 200);
+}
+
+TEST(HttpRouterTest, NotFound) {
+    Router router;
+    Request req; req.set_method(Method::GET); req.set_path("/nonexistent");
+    Response resp = router.route(req);
+    EXPECT_EQ(resp.status_code(), 404);
+}
+
+int main(int argc, char **argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+
+
+────────────────────────────────────────────
+File: ./tests/test_net.cpp
+────────────────────────────────────────────
+#include <gtest/gtest.h>
+#include "eventcore/net/socket.h"
+#include "eventcore/net/buffer.h"
+#include "eventcore/net/address.h"
+
+using namespace eventcore::net;
+
+TEST(SocketTest, Creation) {
+    auto result = Socket::create_tcp();
+    EXPECT_TRUE(result.is_ok());
+}
+
+TEST(BufferTest, BasicOperations) {
+    Buffer buf;
+    buf.append("Hello");
+    EXPECT_EQ(buf.readable_bytes(), 5);
+    auto str = buf.retrieve_all_as_string();
+    EXPECT_EQ(str, "Hello");
+}
+
+TEST(AddressTest, Construction) {
+    Address addr("127.0.0.1", 8080);
+    EXPECT_EQ(addr.ip(), "127.0.0.1");
+    EXPECT_EQ(addr.port(), 8080);
+}
+
+int main(int argc, char **argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+
+
+────────────────────────────────────────────
+File: ./tests/test_server.cpp
+────────────────────────────────────────────
+#include <gtest/gtest.h>
+#include "eventcore/server/config.h"
+
+using namespace eventcore::server;
+
+TEST(ConfigTest, DefaultValues) {
+    Config cfg;
+    EXPECT_EQ(cfg.port, 8080);
+    EXPECT_EQ(cfg.host, "0.0.0.0");
+    EXPECT_TRUE(cfg.tcp_nodelay);
+}
+
+int main(int argc, char **argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+
+
+────────────────────────────────────────────
+File: ./tests/test_thread.cpp
+────────────────────────────────────────────
+#include <gtest/gtest.h>
+#include "eventcore/thread/blocking_queue.h"
+#include "eventcore/thread/thread_pool.h"
+#include <thread>
+#include <atomic>
+#include <chrono>
+
+using namespace eventcore::thread;
+
+TEST(BlockingQueueTest, BasicOperations) {
+    BlockingQueue<int> queue;
+
+    // Test push and pop
+    queue.push(42);
+    int value = 0;
+    EXPECT_TRUE(queue.try_pop(value));
+    EXPECT_EQ(value, 42);
+
+    // Test empty
+    EXPECT_TRUE(queue.empty());
+    EXPECT_EQ(queue.size(), 0);
+}
+
+TEST(BlockingQueueTest, MultipleElements) {
+    BlockingQueue<int> queue;
+
+    for (int i = 0; i < 10; ++i) {
+        queue.push(i);
+    }
+
+    EXPECT_EQ(queue.size(), 10);
+
+    for (int i = 0; i < 10; ++i) {
+        int value = queue.pop();
+        EXPECT_EQ(value, i);
+    }
+
+    EXPECT_TRUE(queue.empty());
+}
+
+TEST(BlockingQueueTest, BlockingPop) {
+    BlockingQueue<int> queue;
+    std::atomic<bool> item_popped{false};
+    int popped_value = 0;
+
+    // Start consumer thread
+    std::thread consumer([&]() {
+            popped_value = queue.pop();
+            item_popped = true;
+            });
+
+    // Give consumer time to block
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_FALSE(item_popped);
+
+    // Push item and verify consumer gets it
+    queue.push(100);
+    consumer.join();
+
+    EXPECT_TRUE(item_popped);
+    EXPECT_EQ(popped_value, 100);
+}
+
+TEST(BlockingQueueTest, TimeoutPop) {
+    BlockingQueue<int> queue;
+    int value = 0;
+
+    // Should timeout since queue is empty
+    EXPECT_FALSE(queue.try_pop(value, 100)); // 100ms timeout
+    EXPECT_EQ(value, 0); // Value shouldn't be modified
+}
+
+TEST(BlockingQueueTest, StopBehavior) {
+    BlockingQueue<int> queue;
+
+    // Push some items
+    queue.push(1);
+    queue.push(2);
+
+    // Stop the queue
+    queue.stop();
+
+    // Should still be able to pop existing items
+    int value = 0;
+    EXPECT_TRUE(queue.try_pop(value));
+    EXPECT_EQ(value, 1);
+
+    EXPECT_TRUE(queue.try_pop(value));
+    EXPECT_EQ(value, 2);
+
+    // Now queue should be empty and stopped
+    EXPECT_TRUE(queue.empty());
+    EXPECT_TRUE(queue.is_stopped());
+
+    // Try pop on stopped empty queue should return false
+    EXPECT_FALSE(queue.try_pop(value));
+}
+
+TEST(ThreadPoolTest, BasicFunctionality) {
+    ThreadPool pool(2);
+    pool.start();
+
+    std::atomic<int> counter{0};
+
+    // Submit tasks
+    for (int i = 0; i < 10; ++i) {
+        pool.submit([&counter]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                counter.fetch_add(1);
+                });
+    }
+
+    // Wait for tasks to complete
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    EXPECT_EQ(counter.load(), 10);
+    pool.stop();
+}
+
+TEST(ThreadPoolTest, StopWithPendingTasks) {
+    ThreadPool pool(1);
+    pool.start();
+
+    std::atomic<int> counter{0};
+
+    // Submit a task that will block
+    pool.submit([&counter]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            counter.fetch_add(1);
+            });
+
+    // Submit more tasks that might not complete
+    for (int i = 0; i < 5; ++i) {
+        pool.submit([&counter]() {
+                counter.fetch_add(1);
+                });
+    }
+
+    // Stop immediately
+    pool.stop();
+
+    // Only the first task should complete (maybe)
+    // The behavior depends on timing, but at least one should complete
+    EXPECT_GE(counter.load(), 1);
+}
+
+int main(int argc, char **argv) {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+
+
+
