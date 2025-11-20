@@ -37,3 +37,14 @@ install(EXPORT EventCoreTargets
     NAMESPACE EventCore::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/EventCore
 )
+
+# Create logs directory during installation
+install(CODE "
+    message(STATUS \"Creating logs directory: ${EVENTCORE_LOG_DIR}\")
+    if(NOT EXISTS \"${EVENTCORE_LOG_DIR}\")
+        file(MAKE_DIRECTORY \"${EVENTCORE_LOG_DIR}\")
+    endif()
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E touch \"${EVENTCORE_LOG_DIR}/.gitkeep\"
+    )
+")
