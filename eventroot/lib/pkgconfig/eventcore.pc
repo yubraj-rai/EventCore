@@ -1,0 +1,13 @@
+prefix=/home/yubraj/EventCore/eventroot
+exec_prefix=/home/yubraj/EventCore/eventroot
+libdir=/home/yubraj/EventCore/eventroot/lib
+includedir=/home/yubraj/EventCore/eventroot/include
+
+Name: EventCore
+Description: High-performance C++14 HTTP Server Framework
+Version: 1.0.0
+URL: https://github.com/yubraj-rai/EventCore
+
+Requires: 
+Libs: -L${libdir} -leventcore
+Cflags: -I${includedir} -std=c++14 -pthread
