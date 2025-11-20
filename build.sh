@@ -1,26 +1,21 @@
 #!/bin/bash
 #
 # EventCore Build Script
-# Generic build script with all configuration options
-#
-# Usage: ./build.sh [OPTIONS]
+# Auto-clean build with fixed prefix
 #
 
 set -e  # Exit on error
 
 # -------------------------------
-# Default values
+# Configuration
 # -------------------------------
 BUILD_TYPE="Release"
-INSTALL_PREFIX=""
+INSTALL_PREFIX="/home/yubraj/EventCore/eventroot"
 BUILD_DIR="build"
 BUILD_SHARED="ON"
 BUILD_TESTS="ON"
 BUILD_EXAMPLES="ON"
 BUILD_BENCHMARKS="OFF"
-CLEAN_BUILD=false
-INSTALL_AFTER_BUILD=false
-RUN_TESTS=false
 JOBS=$(nproc)
 VERBOSE=false
 
@@ -37,60 +32,32 @@ NC='\033[0m' # No Color
 # Functions
 # -------------------------------
 
-# Print colored message
 print_msg() {
     local color=$1
     shift
     echo -e "${color}$@${NC}"
 }
 
-# Print usage/help
 usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Build Configuration:
-  --build-type TYPE         Build type: Debug, Release, RelWithDebInfo, MinSizeRel
-                            (default: Release)
-  --prefix PATH             Install prefix path
-                            (default: \${BUILD_DIR} for local install)
-  --build-dir DIR           Build directory name (default: build)
-  --jobs N                  Number of parallel jobs (default: $(nproc))
+Simple EventCore build script with auto-clean and fixed prefix.
 
-Build Options:
-  --shared [ON|OFF]         Build shared libraries (default: ON)
-  --tests [ON|OFF]          Build tests (default: ON)
-  --examples [ON|OFF]       Build examples (default: ON)
-  --benchmarks [ON|OFF]     Build benchmarks (default: OFF)
-
-Actions:
-  --clean                   Clean build directory before building
-  --install                 Install after successful build
-  --test                    Run tests after build
-  --verbose                 Verbose build output
+Options:
+  --build-type TYPE     Build type: Debug, Release (default: Release)
+  --jobs N              Number of parallel jobs (default: $(nproc))
+  --verbose             Verbose build output
+  --help                Show this help
 
 Examples:
-  # Debug build with local install
-  $0 --build-type Debug --install
+  $0                          # Standard release build
+  $0 --build-type Debug       # Debug build
+  $0 --jobs 4                 # Build with 4 jobs
+  $0 --verbose                # Verbose output
 
-  # Release build, install to /opt/eventcore
-  $0 --build-type Release --prefix /opt/eventcore --install
-
-  # Clean release build with tests
-  $0 --clean --build-type Release --test
-
-  # Minimal build (no tests, no examples)
-  $0 --tests OFF --examples OFF --benchmarks OFF
-
-  # Development build
-  $0 --build-type Debug --clean --install --test --verbose
-
-  # Production build
-  $0 --build-type Release --prefix /usr/local --clean --install
-
-Help:
-  -h, --help                Show this help message
-
+Installation: Always installs to $INSTALL_PREFIX
+Build: Always cleans and rebuilds from scratch
 EOF
     exit 0
 }
@@ -104,45 +71,9 @@ while [[ $# -gt 0 ]]; do
             BUILD_TYPE="$2"
             shift 2
             ;;
-        --prefix)
-            INSTALL_PREFIX="$2"
-            shift 2
-            ;;
-        --build-dir)
-            BUILD_DIR="$2"
-            shift 2
-            ;;
         --jobs)
             JOBS="$2"
             shift 2
-            ;;
-        --shared)
-            BUILD_SHARED="$2"
-            shift 2
-            ;;
-        --tests)
-            BUILD_TESTS="$2"
-            shift 2
-            ;;
-        --examples)
-            BUILD_EXAMPLES="$2"
-            shift 2
-            ;;
-        --benchmarks)
-            BUILD_BENCHMARKS="$2"
-            shift 2
-            ;;
-        --clean)
-            CLEAN_BUILD=true
-            shift
-            ;;
-        --install)
-            INSTALL_AFTER_BUILD=true
-            shift
-            ;;
-        --test)
-            RUN_TESTS=true
-            shift
             ;;
         --verbose)
             VERBOSE=true
@@ -173,58 +104,42 @@ case $BUILD_TYPE in
 esac
 
 # -------------------------------
-# Get script directory (project root)
+# Get script directory
 # -------------------------------
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
-
-# Set install prefix to build dir if not specified
-if [ -z "$INSTALL_PREFIX" ]; then
-    INSTALL_PREFIX="${SCRIPT_DIR}/${BUILD_DIR}"
-    print_msg $YELLOW "Install prefix not specified, using: ${INSTALL_PREFIX}"
-fi
 
 # -------------------------------
 # Print configuration
 # -------------------------------
 print_msg $BLUE "========================================="
-print_msg $BLUE "EventCore Build Configuration"
+print_msg $BLUE "EventCore Auto-Build"
 print_msg $BLUE "========================================="
 echo "Build Type:          $BUILD_TYPE"
 echo "Install Prefix:      $INSTALL_PREFIX"
-echo "Build Directory:     $BUILD_DIR"
+echo "Build Directory:     $BUILD_DIR (always cleaned)"
 echo "Parallel Jobs:       $JOBS"
 echo ""
 echo "Build Shared Libs:   $BUILD_SHARED"
 echo "Build Tests:         $BUILD_TESTS"
 echo "Build Examples:      $BUILD_EXAMPLES"
 echo "Build Benchmarks:    $BUILD_BENCHMARKS"
-echo ""
-echo "Clean Build:         $CLEAN_BUILD"
-echo "Install After Build: $INSTALL_AFTER_BUILD"
-echo "Run Tests:           $RUN_TESTS"
 echo "Verbose:             $VERBOSE"
 print_msg $BLUE "========================================="
 echo ""
 
 # -------------------------------
-# Clean build directory if requested
+# Clean and create build directory
 # -------------------------------
-if [ "$CLEAN_BUILD" = true ]; then
-    print_msg $YELLOW "Cleaning build directory..."
-    rm -rf "$BUILD_DIR"
-fi
-
-# -------------------------------
-# Create build directory
-# -------------------------------
+print_msg $YELLOW "Cleaning previous build..."
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 # -------------------------------
 # Configure with CMake
 # -------------------------------
-print_msg $GREEN "Configuring with CMake..."
+print_msg $GREEN "Configuring CMake..."
 CMAKE_ARGS=(
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
@@ -243,7 +158,7 @@ cmake "${CMAKE_ARGS[@]}" ..
 # -------------------------------
 # Build
 # -------------------------------
-print_msg $GREEN "Building..."
+print_msg $GREEN "Building with $JOBS jobs..."
 MAKE_ARGS="-j${JOBS}"
 
 if [ "$VERBOSE" = true ]; then
@@ -254,82 +169,76 @@ make $MAKE_ARGS
 print_msg $GREEN "Build completed successfully!"
 
 # -------------------------------
-# Run tests if requested
+# Install
 # -------------------------------
-if [ "$RUN_TESTS" = true ]; then
-    print_msg $GREEN "Running tests..."
-    ctest --output-on-failure
-    print_msg $GREEN "All tests passed!"
-fi
+print_msg $GREEN "Installing to $INSTALL_PREFIX..."
+make install
+print_msg $GREEN "Installation completed!"
 
 # -------------------------------
-# Install if requested
+# Verify installation
 # -------------------------------
-if [ "$INSTALL_AFTER_BUILD" = true ]; then
-    print_msg $GREEN "Installing..."
-    
-    if [ ! -w "$(dirname "$INSTALL_PREFIX")" ] && [ "$INSTALL_PREFIX" != "${SCRIPT_DIR}/${BUILD_DIR}" ]; then
-        print_msg $YELLOW "Installing to system location, may require sudo..."
-        sudo make install
-    else
-        make install
-    fi
-    
-    print_msg $GREEN "Installation completed successfully!"
-    print_msg $GREEN "Installed to: $INSTALL_PREFIX"
-fi
-
-# -------------------------------
-# Print summary
-# -------------------------------
+print_msg $GREEN "Verifying installation..."
 echo ""
-print_msg $BLUE "========================================="
-print_msg $BLUE "Build Summary"
-print_msg $BLUE "========================================="
-echo "Build completed in: ${BUILD_DIR}"
-echo ""
+echo "Installed components:"
 
-if [ "$INSTALL_AFTER_BUILD" = true ]; then
-    echo "Installation structure:"
-    echo "  Executables: ${INSTALL_PREFIX}/bin/"
-    echo "  Libraries:   ${INSTALL_PREFIX}/lib/"
-    echo "  Headers:     ${INSTALL_PREFIX}/include/"
-    echo ""
-fi
-
-echo "Built targets:"
-if [ -f "bin/eventcore_server" ]; then
+if [ -f "$INSTALL_PREFIX/bin/eventcore_server" ]; then
     echo "  ✓ eventcore_server"
-fi
-if [ -d "bin/examples" ]; then
-    echo "  ✓ examples ($(ls bin/examples/ 2>/dev/null | wc -l) executables)"
-fi
-if [ -d "bin/tests" ]; then
-    echo "  ✓ tests ($(ls bin/tests/ 2>/dev/null | wc -l) test executables)"
-fi
-if [ -f "lib/libeventcore_static.a" ]; then
-    echo "  ✓ static library"
-fi
-if [ -f "lib/libeventcore.so" ]; then
-    echo "  ✓ shared library"
+else
+    print_msg $RED "  ✗ eventcore_server not found!"
 fi
 
-echo ""
-print_msg $GREEN "Quick Commands:"
-echo "  Run server:       ${BUILD_DIR}/bin/eventcore_server"
-if [ "$BUILD_EXAMPLES" = "ON" ]; then
-    echo "  Run example:      ${BUILD_DIR}/bin/examples/example_server"
-fi
-if [ "$BUILD_TESTS" = "ON" ]; then
-    echo "  Run tests:        cd ${BUILD_DIR} && ctest --output-on-failure"
-fi
-if [ "$INSTALL_AFTER_BUILD" = true ] && [ "$INSTALL_PREFIX" != "${SCRIPT_DIR}/${BUILD_DIR}" ]; then
-    echo "  Run installed:    ${INSTALL_PREFIX}/bin/eventcore_server"
-    echo ""
-    echo "  Add to PATH:      export PATH=\"${INSTALL_PREFIX}/bin:\$PATH\""
+if [ -d "$INSTALL_PREFIX/bin/examples" ]; then
+    EXAMPLE_COUNT=$(ls "$INSTALL_PREFIX/bin/examples" 2>/dev/null | wc -l)
+    echo "  ✓ examples ($EXAMPLE_COUNT executables)"
 fi
 
+if [ -d "$INSTALL_PREFIX/bin/tests" ]; then
+    TEST_COUNT=$(ls "$INSTALL_PREFIX/bin/tests" 2>/dev/null | wc -l)
+    echo "  ✓ tests ($TEST_COUNT executables)"
+fi
+
+if [ -f "$INSTALL_PREFIX/lib/libeventcore_static.a" ]; then
+    echo "  ✓ libeventcore_static.a"
+fi
+
+if [ -f "$INSTALL_PREFIX/lib/libeventcore.so" ]; then
+    echo "  ✓ libeventcore.so"
+fi
+
+if [ -d "$INSTALL_PREFIX/include/eventcore" ]; then
+    HEADER_COUNT=$(find "$INSTALL_PREFIX/include/eventcore" -name "*.h" 2>/dev/null | wc -l)
+    echo "  ✓ headers ($HEADER_COUNT header files)"
+fi
+
+if [ -d "$INSTALL_PREFIX/logs" ]; then
+    echo "  ✓ logs directory"
+fi
+
+# -------------------------------
+# Print usage instructions
+# -------------------------------
 echo ""
 print_msg $BLUE "========================================="
-print_msg $GREEN "Done!"
+print_msg $GREEN "Build Complete!"
+print_msg $BLUE "========================================="
+echo ""
+echo "Quick start:"
+echo "  Run server:    $INSTALL_PREFIX/bin/eventcore_server"
+echo ""
+echo "Available examples:"
+if [ -d "$INSTALL_PREFIX/bin/examples" ]; then
+    for example in "$INSTALL_PREFIX"/bin/examples/*; do
+        if [ -x "$example" ]; then
+        echo "  $(basename "$example")"
+        fi
+    done
+fi
+echo ""
+echo "Environment setup:"
+echo "  Add to your ~/.bashrc:"
+echo "    export PATH=\"$INSTALL_PREFIX/bin:\$PATH\""
+echo "    export LD_LIBRARY_PATH=\"$INSTALL_PREFIX/lib:\$LD_LIBRARY_PATH\""
+echo ""
+echo "Next time, simply run: ./build.sh"
 print_msg $BLUE "========================================="
