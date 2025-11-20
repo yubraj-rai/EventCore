@@ -24,8 +24,18 @@ option(BUILD_TESTS "Build tests" ON)
 option(BUILD_EXAMPLES "Build examples" ON)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 
+# Installation prefix (can be overridden: cmake -DCMAKE_INSTALL_PREFIX=/path/to/eventroot)
+if(NOT CMAKE_INSTALL_PREFIX)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/eventroot")
+endif()
+
+# Define log directory path - FIXED: Use proper CMake syntax
+set(EVENTCORE_LOG_DIR "${CMAKE_INSTALL_PREFIX}/logs")
+add_compile_definitions(EVENTCORE_LOG_DIR="${EVENTCORE_LOG_DIR}")
+
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Source files
 set(EVENTCORE_SOURCES
     src/core/logger.cpp
     src/net/socket.cpp
@@ -57,6 +67,9 @@ set_target_properties(eventcore_static PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
+# Apply compiler options to static library
+eventcore_setup_target(eventcore_static)
+
 # Shared library
 if(BUILD_SHARED_LIBS)
     add_library(eventcore SHARED ${EVENTCORE_SOURCES})
@@ -71,6 +84,8 @@ if(BUILD_SHARED_LIBS)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     )
+    # Apply compiler options to shared library
+    eventcore_setup_target(eventcore)
 endif()
 
 # Executable
@@ -79,6 +94,8 @@ target_link_libraries(eventcore_server PRIVATE eventcore_static)
 set_target_properties(eventcore_server PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
+# Apply compiler options to executable
+eventcore_setup_target(eventcore_server)
 
 # Subdirectories
 if(BUILD_EXAMPLES)
@@ -108,13 +125,13 @@ write_basic_package_version_file(
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EventCoreConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfig.cmake"
+    "${CMAKE_BINARY_DIR}/EventCoreConfig.cmake"
     @ONLY
 )
 
 install(
     FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfig.cmake"
+        "${CMAKE_BINARY_DIR}/EventCoreConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/EventCoreConfigVersion.cmake"
     DESTINATION lib/cmake/EventCore
 )
@@ -132,16 +149,20 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/eventcore.pc"
 
 # Configuration summary
 message(STATUS "")
+message(STATUS "=======================================================")
 message(STATUS "EventCore Configuration Summary")
-message(STATUS "  Version: ${PROJECT_VERSION}")
-message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Install Prefix: ${CMAKE_INSTALL_PREFIX}")
-message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "=======================================================")
+message(STATUS "  Version:              ${PROJECT_VERSION}")
+message(STATUS "  Build Type:           ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Install Prefix:       ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "  Log Directory:        ${EVENTCORE_LOG_DIR}")
+message(STATUS "  C++ Standard:         ${CMAKE_CXX_STANDARD}")
 message(STATUS "")
-message(STATUS "  Build Shared Libraries: ${BUILD_SHARED_LIBS}")
-message(STATUS "  Build Tests: ${BUILD_TESTS}")
-message(STATUS "  Build Examples: ${BUILD_EXAMPLES}")
-message(STATUS "  Build Benchmarks: ${BUILD_BENCHMARKS}")
+message(STATUS "  Build Shared Libs:    ${BUILD_SHARED_LIBS}")
+message(STATUS "  Build Tests:          ${BUILD_TESTS}")
+message(STATUS "  Build Examples:       ${BUILD_EXAMPLES}")
+message(STATUS "  Build Benchmarks:     ${BUILD_BENCHMARKS}")
+message(STATUS "=======================================================")
 message(STATUS "")
 
 # Uninstall target
