@@ -7,18 +7,29 @@ namespace eventcore {
     namespace http {
 
         Connection::Connection(net::Socket socket, RequestHandler handler)
-            : socket_(std::move(socket)), state_(kConnecting), request_handler_(handler) {
-                auto result = socket_.set_nonblocking(true);
-                if (result.is_err()) {
-                    std::stringstream ss;
-                    ss << "Failed to set socket non-blocking: " << result.error();
-                    LOG_ERROR(ss.str());
-                }
+            : socket_(std::move(socket)),
+            state_(kConnecting),
+            request_handler_(handler) 
+        {
+            auto result = socket_.set_nonblocking(true);
+            if (result.is_err()) {
+                std::stringstream ss;
+                ss << "Failed to set socket non-blocking: " << result.error();
+                LOG_ERROR(ss.str());
             }
+        }
 
-        Connection::~Connection() { if (state_ != kDisconnected) force_close(); }
+        Connection::~Connection() {
+            if (state_ != kDisconnected) {
+                force_close();
+            }
+        }
 
-        void Connection::start() { state_ = kConnected; handle_read(); }
+        void Connection::start() {
+            state_ = kConnected;
+            update_activity();  // Initialize activity timer
+            handle_read();
+        }
 
         void Connection::send(const Response& response) {
             if (state_ != kConnected) return;
@@ -27,12 +38,20 @@ namespace eventcore {
             handle_write();
         }
 
-        void Connection::shutdown() { if (state_ == kConnected) state_ = kDisconnecting; socket_.shutdown_write(); }
+        void Connection::shutdown() {
+            if (state_ == kConnected) {
+                state_ = kDisconnecting;
+                socket_.shutdown_write();
+            }
+        }
 
         void Connection::force_close() {
             if (state_ != kDisconnected) {
-                state_ = kDisconnected; socket_.close();
-                if (close_callback_) close_callback_(shared_from_this());
+                state_ = kDisconnected;
+                socket_.close();
+                if (close_callback_) {
+                    close_callback_(shared_from_this());
+                }
             }
         }
 
@@ -50,7 +69,6 @@ namespace eventcore {
                     handle_close();
                     break;
                 } else {
-                    // Check errno
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
                         break;  // No more data available
                     }
@@ -60,52 +78,92 @@ namespace eventcore {
             }
         }
 
-
         void Connection::handle_write() {
             if (state_ != kConnected && state_ != kDisconnecting) return;
+
             if (write_buffer_.readable_bytes() > 0) {
                 auto result = socket_.send(write_buffer_.peek(), write_buffer_.readable_bytes());
                 if (result.is_ok()) {
                     write_buffer_.retrieve(result.value());
-                    if (write_buffer_.readable_bytes() == 0 && state_ == kDisconnecting) force_close();
-                } else handle_error();
-            } else if (state_ == kDisconnecting) force_close();
+                    if (write_buffer_.readable_bytes() == 0 && state_ == kDisconnecting) {
+                        force_close();
+                    }
+                } else {
+                    handle_error();
+                }
+            } else if (state_ == kDisconnecting) {
+                force_close();
+            }
         }
 
-        void Connection::handle_error() { 
+        void Connection::handle_error() {
             std::stringstream ss;
             ss << "Connection error on fd: " << socket_.fd();
-            LOG_ERROR(ss.str()); 
-            force_close(); 
+            LOG_ERROR(ss.str());
+            force_close();
         }
 
-        void Connection::handle_close() { 
+        void Connection::handle_close() {
             std::stringstream ss;
             ss << "Connection closed on fd: " << socket_.fd();
-            LOG_DEBUG(ss.str()); 
-            force_close(); 
+            LOG_DEBUG(ss.str());
+            force_close();
         }
 
         void Connection::process_request() {
             while (true) {
-                Request request; parser_.reset();
-                if (!parser_.parse_request(&read_buffer_, &request)) break;
+                Request request;
+                parser_.reset();
+
+                LOG_DEBUG("Attempting to parse request, readable bytes: ",
+                        read_buffer_.readable_bytes());
+
+                if (!parser_.parse_request(&read_buffer_, &request)) {
+                    LOG_DEBUG("Parse failed or incomplete");
+                    break;
+                }
+
                 if (parser_.is_complete()) {
-                    Response response = request_handler_(request); send_response(response);
+                    LOG_DEBUG("Request parsed successfully: ",
+                            Request::method_to_string(request.method()), " ",
+                            request.path());
+
+                    request_ = request;
+                    Response response = request_handler_(request);
+
+                    LOG_DEBUG("Sending response with status: ", response.status_code());
+                    send_response(response);
+
                     std::string connection = request.get_header("Connection");
-                    if (connection == "close") { shutdown(); break; }
-                } else break;
+                    LOG_DEBUG("Connection header: ", connection);
+
+                    if (connection == "close") {
+                        LOG_DEBUG("Closing connection as requested");
+                        shutdown();
+                        break;
+                    }
+                } else {
+                    LOG_DEBUG("Parser not complete yet");
+                    break;
+                }
             }
         }
 
         void Connection::send_response(const Response& response) {
             std::string request_connection = request_.get_header("Connection");
-            bool keep_alive = request_connection == "keep-alive" || (request_.version() == Version::HTTP_1_1 && request_connection != "close");
-            Response resp = response; resp.set_keep_alive(keep_alive); send(resp);
+            bool keep_alive =
+                request_connection == "keep-alive" ||
+                (request_.version() == Version::HTTP_1_1 &&
+                 request_connection != "close");
+
+            Response resp = response;
+            resp.set_keep_alive(keep_alive);
+            send(resp);
         }
 
         void Connection::reset(int fd) {
             socket_ = net::Socket(fd);
+
             auto result = socket_.set_nonblocking(true);
             if (result.is_err()) {
                 LOG_ERROR("Failed to set non-blocking: ", result.error());
@@ -128,6 +186,6 @@ namespace eventcore {
             return (now - last_activity_) > timeout;
         }
 
+    }  // namespace http
+}  // namespace eventcore
 
-    } // namespace http
-} // namespace eventcore
